@@ -23,6 +23,7 @@ model_path1 = os.path.join(os.path.dirname(__file__), '..', 'models', 'yunet.onn
 model_path2 = os.path.join(os.path.dirname(__file__), '..', 'models', 'mobilefacenet.tflite')
 data_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'known_faces.json')
 log_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'attendance_log.csv')
+diag_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'diagnostic_log.csv')
 
 def draw_debug_info(frame, x, y, info_lines, color):
     """ Draws multiple lines of text with spacing and a readable outline. """
@@ -108,6 +109,22 @@ class FinalHybridEdge:
                                       "liveness_label", "reason", "distance", "brightness", 
                                       "motion_score", "geometry_score", "mode", "track_id"])
 
+        # Per-frame, per-track diagnostic log. Decoupled from the attendance
+        # log so analyze_results.py and existing schemas keep working.
+        diag_exists = os.path.isfile(diag_path) and os.path.getsize(diag_path) > 0
+        self.diag_file = open(diag_path, 'a', newline='')
+        self.diag_writer = csv.writer(self.diag_file)
+        if not diag_exists:
+            self.diag_writer.writerow([
+                "timestamp", "frame_w", "frame_h", "track_id",
+                "lbl", "live_conf", "reason", "decision",
+                "mode", "distance", "brightness",
+                "avg_mag", "avg_ang_var", "avg_mag_var", "avg_area_var", "rigid_ratio",
+                "m_score", "g_score",
+                "identity", "sim", "th_high", "th_mid",
+                "latency_ms",
+            ])
+
     def extract_embedding(self, face_img):
         input_tensor = (np.float32(face_img) - 127.5) / 128.0
         input_tensor = np.expand_dims(input_tensor, axis=0)
@@ -115,6 +132,49 @@ class FinalHybridEdge:
         self.interpreter.invoke()
         emb = self.interpreter.get_tensor(self.out_idx)[0]
         return emb / np.linalg.norm(emb)
+
+    def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
+        """Draw the per-track debug overlay. Always called, regardless of
+        which gate the pipeline exited on, via the try/finally in run()."""
+        lbl = dbg['lbl']
+        if lbl == "REAL":
+            color = (0, 255, 0)
+        elif lbl == "SPOOF":
+            color = (0, 0, 255)
+        elif lbl == "UNCERTAIN":
+            color = (0, 255, 255)
+        elif lbl == "ANALYZING":
+            color = (255, 200, 0)
+        else:
+            color = (200, 200, 200)
+
+        info_lines = [
+            f"ID:{track_id} {dbg['mode']} d:{dbg['distance']:.2f}m",
+            f"Live:{lbl} ({dbg['live_conf']:.2f})  br:{dbg['brightness']:.0f}",
+            f"sim:{dbg['sim']:.2f}/th:{dbg['th_high']:.2f}  {dbg['identity']}",
+            f"mag:{dbg['avg_mag']:.2f}  angV:{dbg['avg_ang_var']:.3f}  magV:{dbg['avg_mag_var']:.2f}",
+            f"rigid:{dbg['rigid_ratio']:.2f}  areaV:{dbg['avg_area_var']:.0f}",
+            f"D:{dbg['decision']}",
+            f"R:{dbg['rsn']}",
+        ]
+        cv2.rectangle(frame, (x, y), (x + fw, y + fh), color, 2)
+        draw_debug_info(frame, x + fw + 8, max(20, y), info_lines, color)
+
+    def _write_diag(self, loop_start, frame_w, frame_h, track_id, dbg):
+        """Append one diagnostic row per (frame, track), regardless of decision."""
+        latency_ms = (time.time() - loop_start) * 1000
+        self.diag_writer.writerow([
+            round(time.time(), 3), frame_w, frame_h, track_id,
+            dbg['lbl'], round(dbg['live_conf'], 3), dbg['rsn'], dbg['decision'],
+            dbg['mode'], round(dbg['distance'], 3), round(dbg['brightness'], 1),
+            round(dbg['avg_mag'], 3), round(dbg['avg_ang_var'], 4),
+            round(dbg['avg_mag_var'], 3), round(dbg['avg_area_var'], 1),
+            round(dbg['rigid_ratio'], 3),
+            round(dbg['m_score'], 3), round(dbg['g_score'], 3),
+            dbg['identity'], round(dbg['sim'], 3),
+            round(dbg['th_high'], 3), round(dbg['th_mid'], 3),
+            round(latency_ms, 1),
+        ])
 
     def run(self):
         cap = cv2.VideoCapture(0)
@@ -175,36 +235,73 @@ class FinalHybridEdge:
 
             for track_id, (centroid, box) in objects.items():
                 x, y, fw, fh = box
-                
-                # 🟢 MODIFY THIS: Pass valid_faces instead of raw faces
-                matched_face = find_best_face_match(box, valid_faces, iou_threshold=0.3)
-                
-                if matched_face is None:
-                    self.embedding_buffers.pop(track_id, None)
-                    self.liveness.history.pop(track_id, None)
-                    continue
-                
-                # Extract landmarks safely
-                landmarks = [(int(matched_face[4+2*j]), int(matched_face[4+2*j+1])) for j in range(5)]
-                
-                # ... [The rest of your pipeline (Pose, Liveness, Embeddings, Match) remains EXACTLY the same] ...
-                mode = self.pose_est.estimate_mode(track_id, landmarks)
-                
-                distance = settings.K_FOCAL / (np.sqrt(fw * fh) + 1e-5)
-                if not (settings.MIN_DISTANCE < distance < settings.MAX_DISTANCE): continue
-                
-                # FIX 4,5,6,7: Deep Temporal Liveness
-                lbl, conf, rsn, m_score, g_score = self.liveness.assess_frame(
-                    track_id, mode, prev_gray, frame, box, landmarks)
-                    
-                if lbl != "REAL":
-                    self.embedding_buffers.pop(track_id, None)
-                    continue
 
-                if lbl == "REAL":
+                # Per-track debug snapshot. Initialised before any gate so that
+                # the finally-block can always render an overlay and emit a
+                # diagnostic row even if the pipeline short-circuits.
+                dbg = {
+                    'lbl': 'NA', 'live_conf': 0.0, 'rsn': 'init',
+                    'mode': 'NA', 'distance': 0.0, 'brightness': 0.0,
+                    'm_score': 0.0, 'g_score': 0.0,
+                    'avg_mag': 0.0, 'avg_ang_var': 0.0, 'avg_mag_var': 0.0,
+                    'avg_area_var': 0.0, 'rigid_ratio': 0.0,
+                    'sim': 0.0, 'identity': 'NA',
+                    'th_high': 0.0, 'th_mid': 0.0,
+                    'decision': 'NONE',
+                }
+
+                try:
+                    # 🟢 MODIFY THIS: Pass valid_faces instead of raw faces
+                    matched_face = find_best_face_match(box, valid_faces, iou_threshold=0.3)
+
+                    if matched_face is None:
+                        self.embedding_buffers.pop(track_id, None)
+                        self.liveness.history.pop(track_id, None)
+                        self.liveness.last_signals.pop(track_id, None)
+                        dbg['rsn'] = 'No detection match'
+                        dbg['decision'] = 'NO_MATCH'
+                        continue
+
+                    # Extract landmarks safely
+                    landmarks = [(int(matched_face[4+2*j]), int(matched_face[4+2*j+1])) for j in range(5)]
+
+                    # ... [The rest of your pipeline (Pose, Liveness, Embeddings, Match) remains EXACTLY the same] ...
+                    mode = self.pose_est.estimate_mode(track_id, landmarks)
+                    dbg['mode'] = mode
+
+                    distance = settings.K_FOCAL / (np.sqrt(fw * fh) + 1e-5)
+                    dbg['distance'] = float(distance)
+                    if not (settings.MIN_DISTANCE < distance < settings.MAX_DISTANCE):
+                        dbg['rsn'] = f'Distance OOR ({distance:.2f}m)'
+                        dbg['decision'] = 'OUT_OF_RANGE'
+                        continue
+
+                    # FIX 4,5,6,7: Deep Temporal Liveness
+                    lbl, conf, rsn, m_score, g_score = self.liveness.assess_frame(
+                        track_id, mode, prev_gray, frame, box, landmarks)
+                    dbg['lbl'] = lbl
+                    dbg['live_conf'] = float(conf)
+                    dbg['rsn'] = rsn
+                    dbg['m_score'] = float(m_score)
+                    dbg['g_score'] = float(g_score)
+
+                    # Pull raw signals straight from the liveness engine for
+                    # threshold calibration and the on-screen overlay.
+                    sig = self.liveness.last_signals.get(track_id, {})
+                    dbg['avg_mag'] = float(sig.get('avg_mag', 0.0))
+                    dbg['avg_ang_var'] = float(sig.get('avg_angle_var', 0.0))
+                    dbg['avg_mag_var'] = float(sig.get('avg_mag_var', 0.0))
+                    dbg['avg_area_var'] = float(sig.get('avg_area_var', 0.0))
+                    dbg['rigid_ratio'] = float(sig.get('rigid_ratio', 0.0))
+
+                    if lbl != "REAL":
+                        self.embedding_buffers.pop(track_id, None)
+                        dbg['decision'] = 'REJECTED_LIVENESS'
+                        continue
+
                     if track_id not in self.embedding_buffers:
                         self.embedding_buffers[track_id] = deque(maxlen=settings.LIVENESS_WINDOW)
-                    
+
                     # FIX 1: 5-Point Alignment
                     bgr_crop = frame[max(0,y):y+fh, max(0,x):x+fw]
                     if bgr_crop.size > 0:
@@ -213,70 +310,55 @@ class FinalHybridEdge:
                         emb = self.extract_embedding(aligned_face)
                         self.embedding_buffers[track_id].append(emb)
 
-                    if len(self.embedding_buffers[track_id]) >= settings.LIVENESS_WINDOW:
-                        mean_emb = np.mean(self.embedding_buffers[track_id], axis=0)
-                        mean_emb = mean_emb / np.linalg.norm(mean_emb)
-                        
-                        # FIX 9: Pose-Aware Matching
-                        identity, sim = self.controller.pose_aware_match(mean_emb, mode)
-                        
-                        # FIX 8: Adaptive Thresholds
-                        brightness = np.mean(curr_gray[y:y+fh, x:x+fw])
-                        th_high, th_mid = self.controller.get_adaptive_threshold(brightness, distance, mode=="OVERHEAD")
-                        
-                        if sim >= th_high:
-                            if time.time() - self.cooldowns.get(identity, 0) > 300:
-                                self.cooldowns[identity] = time.time()
-                                print(f"ATTENDANCE MARKED: {identity}")
-                        elif sim >= th_mid:
-                            print("OFFLOADING TO ARCFACE SERVER...")
+                    if len(self.embedding_buffers[track_id]) < settings.LIVENESS_WINDOW:
+                        dbg['decision'] = 'BUFFERING'
+                        try:
+                            dbg['brightness'] = float(np.mean(curr_gray[y:y+fh, x:x+fw]))
+                        except Exception:
+                            pass
+                        continue
 
-                        # FIX 11: Comprehensive Logging
-                        total_latency = (time.time() - loop_start) * 1000
-                        self.csv_writer.writerow([
-                            identity, round(sim, 3), time.time(), round(total_latency, 1),
-                            lbl, rsn, round(distance, 2), round(brightness, 1),
-                            round(m_score, 2), round(g_score, 2), mode, track_id
-                        ])
+                    mean_emb = np.mean(self.embedding_buffers[track_id], axis=0)
+                    mean_emb = mean_emb / np.linalg.norm(mean_emb)
 
-                # ==========================================
-                # 🛑 UI & DEBUG VISUALIZATION OVERLAY 🛑
-                # ==========================================
-                
-                # 1. Safe Variable Handling (Defaults if undefined)
-                safe_lbl = locals().get("lbl", "UNKNOWN")
-                safe_conf = locals().get("sim", locals().get("conf", 0.0))
-                safe_mode = locals().get("mode", "NA")
-                safe_dist = locals().get("distance", 0.0)
-                safe_bright = locals().get("brightness", 0.0)
-                safe_m_score = locals().get("m_score", 0.0)
-                safe_g_score = locals().get("g_score", 0.0)
-                safe_rsn = locals().get("rsn", "N/A")
+                    # FIX 9: Pose-Aware Matching
+                    identity, sim = self.controller.pose_aware_match(mean_emb, mode)
+                    dbg['identity'] = identity
+                    dbg['sim'] = float(sim)
 
-                # 2. Determine Bounding Box Color
-                if safe_lbl == "REAL":
-                    color = (0, 255, 0)      # Green
-                elif safe_lbl == "SPOOF":
-                    color = (0, 0, 255)      # Red
-                elif safe_lbl == "UNCERTAIN":
-                    color = (0, 255, 255)    # Yellow
-                else:
-                    color = (200, 200, 200)  # Gray fallback
+                    # FIX 8: Adaptive Thresholds
+                    brightness = np.mean(curr_gray[y:y+fh, x:x+fw])
+                    dbg['brightness'] = float(brightness)
+                    th_high, th_mid = self.controller.get_adaptive_threshold(brightness, distance, mode=="OVERHEAD")
+                    dbg['th_high'] = float(th_high)
+                    dbg['th_mid'] = float(th_mid)
 
-                # 3. Format Information Lines
-                info_lines = [
-                    f"ID: {track_id} | Mode: {safe_mode}",
-                    f"Live: {safe_lbl} ({safe_conf:.2f})",
-                    f"Dist: {safe_dist:.1f}m | Bright: {safe_bright:.0f}",
-                    f"Motion: {safe_m_score:.2f} | Geom: {safe_g_score:.2f}",
-                    f"Status: {safe_rsn}"
-                ]
+                    if sim >= th_high:
+                        dbg['decision'] = 'MATCHED'
+                        if time.time() - self.cooldowns.get(identity, 0) > 300:
+                            self.cooldowns[identity] = time.time()
+                            print(f"ATTENDANCE MARKED: {identity}")
+                    elif sim >= th_mid:
+                        dbg['decision'] = 'OFFLOAD_TO_CLOUD'
+                        print("OFFLOADING TO ARCFACE SERVER...")
+                    else:
+                        dbg['decision'] = 'BELOW_THRESHOLD'
 
-                # 4. Draw Single Bounding Box
-                cv2.rectangle(frame, (x, y), (x+fw, y+fh), color, 2)
+                    # FIX 11: Comprehensive Logging
+                    total_latency = (time.time() - loop_start) * 1000
+                    self.csv_writer.writerow([
+                        identity, round(sim, 3), time.time(), round(total_latency, 1),
+                        lbl, rsn, round(distance, 2), round(brightness, 1),
+                        round(m_score, 2), round(g_score, 2), mode, track_id
+                    ])
 
-                # 5. Draw Debug Info using Helper Function
-                draw_debug_info(frame, x + fw + 8, max(20, y), info_lines, color)
+                finally:
+                    # Overlay + diagnostic row fire on EVERY path: NO_MATCH,
+                    # OUT_OF_RANGE, REJECTED_LIVENESS, BUFFERING, MATCHED,
+                    # OFFLOAD, BELOW_THRESHOLD. Required for spoof-rejection
+                    # consistency and threshold calibration analyses.
+                    self._draw_overlay(frame, x, y, fw, fh, track_id, dbg)
+                    self._write_diag(loop_start, w, h, track_id, dbg)
                 
             prev_gray = curr_gray.copy()
             cv2.imshow("Hybrid Edge Pipeline", frame)
@@ -294,6 +376,7 @@ class FinalHybridEdge:
         cap.release()
         cv2.destroyAllWindows()
         self.log_file.close()
+        self.diag_file.close()
 
 if __name__ == "__main__":
     node = FinalHybridEdge()

@@ -53,6 +53,9 @@ def analyze_motion(prev_gray, curr_gray, landmarks, threshold_angle=0.15, thresh
 class LivenessEngine:
     def __init__(self):
         self.history = {}
+        # Exposed read-only window of raw signals for the most recent vote.
+        # Populated in _temporal_vote(); read by main.py for overlay + diagnostic CSV.
+        self.last_signals = {}
 
     def initialize_track(self, track_id):
         if track_id not in self.history:
@@ -142,6 +145,21 @@ class LivenessEngine:
         
         is_moving = avg_mag > settings.MOTION_MIN_THRESHOLD
         rigid_flags = [s.get('is_rigid', False) for s in hist]
+
+        # Surface raw, un-normalized signals so the runtime overlay and the
+        # diagnostic CSV can see exactly what the gates compared against.
+        self.last_signals[track_id] = {
+            'avg_mag': float(avg_mag),
+            'avg_angle_var': float(avg_angle_var),
+            'avg_mag_var': float(avg_mag_var),
+            'avg_area_var': float(area_var),
+            'rigid_ratio': float(sum(rigid_flags)) / max(1, len(rigid_flags)),
+            'avg_skin': float(avg_skin),
+            'avg_blur': float(avg_blur),
+            'avg_bright': float(avg_bright),
+            'is_moving': bool(is_moving),
+        }
+
         if sum(rigid_flags) > len(rigid_flags) // 2:
             return "SPOOF", 0.1, "Rigid Motion Detected", avg_mag, area_var
         # 1. The Planar Motion Trap (Defeats sliding a phone or paper)
