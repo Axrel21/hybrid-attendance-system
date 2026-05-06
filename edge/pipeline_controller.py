@@ -32,8 +32,14 @@ class PipelineController:
                 if len(pool) == 0: pool = vectors.get("frontal", []) # Fallback
                 
             for v in pool:
+                v = np.array(v, dtype=np.float32)
+                v = v / (np.linalg.norm(v) + 1e-6)
                 sim = np.dot(mean_embedding, v)
                 if sim > max_sim:
                     max_sim, best_match = sim, name
-                    
+
         return best_match, max_sim
+
+    def get_identity_status(self, identity):
+        """ Returns status of identity in the database. """
+        return self.db.get(identity, {}).get("status", "UNKNOWN")

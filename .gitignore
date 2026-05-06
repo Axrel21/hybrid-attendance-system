@@ -217,10 +217,11 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-
-dataset/
-data/
 models/
+data/
+dataset/
+
 *.onnx
 *.tflite
+*.pkl
 __pycache__/

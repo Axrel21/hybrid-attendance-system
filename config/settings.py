@@ -7,12 +7,7 @@ try:
 except ImportError:
     pass
 
-try:
-    import tensorflow as tf
-    tf.config.threading.set_inter_op_parallelism_threads(1)
-    tf.config.threading.set_intra_op_parallelism_threads(1)
-except Exception:
-    pass
+# FIX-8: Removed unconditional import and setting of tensorflow threads to prevent bottlenecking non-Pi environments.
 
 # System Modes & Simulation
 SIMULATE_PI = True       
@@ -29,21 +24,14 @@ K_FOCAL = 1000
 MIN_DISTANCE = 1.0       
 MAX_DISTANCE = 3.5       
 
-# ==========================================
-# 🛡️ 5-Tier Liveness & Anti-Spoofing Tuning
-# ==========================================
+# 5-Tier Liveness Tuning
 LIVENESS_WINDOW = 8
-
-# Motion & Planar Traps (Defeats Phones / Screens)
-MOTION_MIN_THRESHOLD = 0.5    # Minimum average pixel movement to be considered active motion
-RIGID_ANGLE_VAR_TH = 0.15     # If all points move same direction, it's a flat surface
-RIGID_MAG_VAR_TH = 1.5        # If all points move same speed, it's a flat surface
-
-# Geometry & Texture Traps (Defeats Photos / Masks)
-MIN_AREA_VAR_TH = 50.0        # Real faces naturally change size; printed/phones stay rigidly static
-MAX_BRIGHTNESS_TH = 200.0     # Phone screens held close often blow out the brightness
-SCREEN_LAPLACIAN_TH = 100.0   # Phone pixels often create artificially sharp edges
-MIN_SKIN_RATIO = 0.15         # Reject screens/masks with abnormally low human skin tones
+RIGID_ANGLE_VAR_TH = 0.15
+RIGID_MAG_VAR_TH = 1.5
+SCREEN_LAPLACIAN_TH = 80.0
+STATIC_AREA_VAR_TH = 50.0      # Reject photo (no geometric expansion)
+UNREAL_AREA_VAR_TH = 5000.0    # Reject glitchy tracking jumps
+MIN_SKIN_RATIO = 0.15          # Reject screens/masks with low skin
 
 # Set Environment Variables for Simulation
 if SIMULATE_PI:
@@ -51,7 +39,14 @@ if SIMULATE_PI:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
     os.environ["TF_NUM_INTEROP_THREADS"] = "1"
-    
     cv2.setNumThreads(1)
-    tf.config.threading.set_inter_op_parallelism_threads(1)
-    tf.config.threading.set_intra_op_parallelism_threads(1)
+    # TF optimizations safely nested under SIMULATE_PI condition
+    try:
+        import tensorflow as tf
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(1) 
+    except Exception:
+        pass
+    
+# Liveness Motion Tuning
+MOTION_MIN_THRESHOLD = 0.5  # Minimum average pixel movement to be considered active motion

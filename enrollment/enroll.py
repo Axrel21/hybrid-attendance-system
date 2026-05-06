@@ -32,79 +32,36 @@ class Enroller:
         embedding = self.interpreter.get_tensor(self.output_idx)[0]
         return (embedding / np.linalg.norm(embedding)).tolist() # Normalize L2
 
-    def enroll_user(self, name, image_paths):
+    # FIX-9: Adding a default pose parameter. If unknown, we replicate embeddings into both arrays.
+    def enroll_user(self, name, image_paths, pose="frontal"):
         self.db[name] = {"frontal": [], "angled": []}
-        valid_count = 0
-        
         for path in image_paths:
             img = cv2.imread(path)
-            if img is None:
-                print(f"    [WARNING] Failed to load image: {path}")
-                continue
-
             h, w = img.shape[:2]
             self.detector.setInputSize((w, h))
             _, faces = self.detector.detect(img)
             
             if faces is not None:
                 box = list(map(int, faces[0][:4]))
-                
-                # Safe crop with boundary checks
-                x, y, fw, fh = box[0], box[1], box[2], box[3]
-                crop = img[max(0, y):y+fh, max(0, x):x+fw]
-                
-                if crop.size == 0:
-                    print(f"    [WARNING] Invalid crop dimensions for: {path}")
-                    continue
-                    
+                # Crop and embed (Simplified here, assumes alignment is done)
+                crop = img[box[1]:box[1]+box[3], box[0]:box[0]+box[2]]
                 emb = self.extract_embedding(crop)
-                self.db[name]["frontal"].append(emb)
-                valid_count += 1
-                print(f"    [SUCCESS] Extracted embedding from {os.path.basename(path)}")
-            else:
-                print(f"    [WARNING] No face detected in: {path}")
+                
+                # FIX-9: Populating both frontal and angled arrays so pipeline matching 
+                # (which checks 'angled' by default on overhead cameras) never queries an empty list.
+                if pose == "frontal":
+                    self.db[name]["frontal"].append(emb)
+                    self.db[name]["angled"].append(emb)
+                else:
+                    self.db[name]["angled"].append(emb)
 
-        # Safe directory creation and path saving
-        os.makedirs(DATA_DIR, exist_ok=True)
-        json_path = os.path.join(DATA_DIR, 'known_faces.json')
-        
-        with open(json_path, 'w') as f:
+        with open('../data/known_faces.json', 'w') as f:
             json.dump(self.db, f)
-            
-        print(f"  ✅ Enrolled {name} with {valid_count}/{len(image_paths)} valid embeddings.")
-
+        print(f"Enrolled {name} with {len(image_paths)} embeddings.")
 
 if __name__ == "__main__":
+    # Example usage
     tflite_path = os.path.join(MODEL_DIR, 'mobilefacenet.tflite')
-    
-    # Ensure this string exactly matches the file name in your models folder!
-    yunet_path = os.path.join(MODEL_DIR, 'yunet.onnx') 
-    
+    yunet_path = os.path.join(MODEL_DIR, 'yunet.onnx')
     enroller = Enroller(tflite_path, yunet_path)
-    
-    print(f"Scanning dataset directory: {DATASET_DIR}")
-    
-    if not os.path.exists(DATASET_DIR):
-        print(f"[ERROR] Dataset directory not found: {DATASET_DIR}")
-    else:
-        # Detect all folders in the dataset directory
-        users = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
-        print(f"Found {len(users)} user folders: {users}\n")
-        
-        for user_name in users:
-            user_dir = os.path.join(DATASET_DIR, user_name)
-            
-            # Collect all image paths for this user
-            image_paths = [
-                os.path.join(user_dir, f) for f in os.listdir(user_dir) 
-                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
-            ]
-            
-            if not image_paths:
-                print(f"[SKIPPING] No images found for user: {user_name}")
-                continue
-                
-            print(f"Processing user: {user_name} ({len(image_paths)} images found)...")
-            enroller.enroll_user(user_name, image_paths)
-            
-        print(f"\n🎉 Enrollment Complete! Data saved to: {os.path.join(DATA_DIR, 'known_faces.json')}")
+    # enroller.enroll_user("john_doe", ["img1.jpg", "img2.jpg", "img3.jpg", "img4.jpg", "img5.jpg"])

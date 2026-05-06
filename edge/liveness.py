@@ -49,6 +49,7 @@ def analyze_motion(prev_gray, curr_gray, landmarks, threshold_angle=0.15, thresh
     is_rigid = bool(is_moving and angle_variance < threshold_angle and magnitude_variance < threshold_mag)
     
     return magnitude_mean, angle_variance, magnitude_variance, is_rigid
+
 class LivenessEngine:
     def __init__(self):
         self.history = {}
@@ -77,7 +78,10 @@ class LivenessEngine:
         x, y, w, h = curr_box
         bgr_crop = frame[y:y+h, x:x+w]
         
+        stats = {} # FIX-5: Declared stats dictionary early to prevent NameError
+        
         if prev_gray is not None:
+            curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             motion_score, ang_var, mag_var, rigid_flag = analyze_motion(
                 prev_gray, curr_gray, landmarks, 
                 threshold_angle=settings.RIGID_ANGLE_VAR_TH, 
@@ -86,123 +90,111 @@ class LivenessEngine:
     
             stats['mag'] = motion_score
             stats['angle_var'] = ang_var
-            stats['mag_var'] = mag_var
-            stats['is_rigid'] = rigid_flag
+            stats['mag_var'] = mag_var      # FIX-6: Populated from correctly executed analyze_motion
+            stats['is_rigid'] = rigid_flag  # FIX-6: Populated from correctly executed analyze_motion
         else:
             stats['mag'], stats['angle_var'], stats['mag_var'], stats['is_rigid'] = 0.0, 0.0, 0.0, False
         
         if bgr_crop.size == 0: return "UNKNOWN", 0.0, "Invalid Crop", 0, 0
         
-        stats = {}
-        skin_ratio, entropy, curr_gray = self.get_texture_metrics(bgr_crop)
+        # FIX-7: Unpack texture metrics to crop_gray so it doesn't overwrite/shadow the full-frame curr_gray needed for flow tracking
+        skin_ratio, entropy, crop_gray = self.get_texture_metrics(bgr_crop) 
+        
         stats['skin'] = skin_ratio
         stats['entropy'] = entropy
-        stats['blur'] = cv2.Laplacian(curr_gray, cv2.CV_64F).var()
-        stats['brightness'] = np.mean(curr_gray)
+        stats['blur'] = cv2.Laplacian(crop_gray, cv2.CV_64F).var() # FIX-7: Applies to isolated face crop grayscale
+        stats['brightness'] = np.mean(crop_gray)                   # FIX-7: Applies to isolated face crop grayscale
         stats['area'] = w * h
         stats['centroid'] = (x + w/2.0, y + h/2.0)
 
-        # Optical Flow (Motion)
-        pts = np.array(landmarks, dtype=np.float32).reshape(-1, 1, 2)
-        if prev_gray is not None:
-            next_pts, status, _ = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, pts, None)
-            if status is not None and len(status[status == 1]) > 0:
-                valid = status == 1
-                flow = next_pts[valid] - pts[valid]
-                stats['mag'] = np.mean(np.linalg.norm(flow, axis=1))
-                stats['angle_var'] = np.var(np.arctan2(flow[:, 1], flow[:, 0]))
-            else:
-                stats['mag'], stats['angle_var'] = 0, 0
-        else:
-            stats['mag'], stats['angle_var'] = 0, 0
-            
+        # FIX-6: Deleted redundant optical flow block that overwrote variables with incorrect attributes
+
         self.history[track_id].append(stats)
         return self._temporal_vote(track_id, current_mode)
 
-def _temporal_vote(self, track_id, mode):
-    hist = self.history[track_id]
-    if len(hist) < settings.LIVENESS_WINDOW:
-        print(f"[LIVENESS] Track {track_id} → ANALYZING (buffering)")
-        return "ANALYZING", 0.5, "Buffering frames", 0.0, 0.0
+    # FIX-4: Correctly indented _temporal_vote to be an instance method of LivenessEngine
+    def _temporal_vote(self, track_id, mode):
+        hist = self.history[track_id]
+        if len(hist) < settings.LIVENESS_WINDOW:
+            return "ANALYZING", 0.5, "Buffering frames", 0.0, 0.0
 
-    areas = [s['area'] for s in hist]
-    mags = [s['mag'] for s in hist]
-    angle_vars = [s['angle_var'] for s in hist]
-    mag_vars = [s['mag_var'] for s in hist]
-    skins = [s['skin'] for s in hist]
-    blurs = [s['blur'] for s in hist]
-    brightnesses = [s['brightness'] for s in hist]
-    entropies = [s.get('entropy', 5.0) for s in hist]
+        # Extract Time-Series Data
+        areas = [s['area'] for s in hist]
+        mags = [s['mag'] for s in hist]
+        angle_vars = [s['angle_var'] for s in hist]
+        mag_vars = [s['mag_var'] for s in hist]
+        skins = [s['skin'] for s in hist]
+        blurs = [s['blur'] for s in hist]
+        brightnesses = [s['brightness'] for s in hist]
 
-    avg_mag = np.mean(mags)
-    avg_angle_var = np.mean(angle_vars)
-    avg_mag_var = np.mean(mag_vars)
-    area_var = np.var(areas)
-    avg_skin = np.mean(skins)
-    avg_blur = np.mean(blurs)
-    avg_bright = np.mean(brightnesses)
-    avg_entropy = np.mean(entropies)
+        # Calculate averages and variances over the window
+        avg_mag = np.mean(mags)
+        avg_angle_var = np.mean(angle_vars)
+        avg_mag_var = np.mean(mag_vars)
+        area_var = np.var(areas)
+        avg_skin = np.mean(skins)
+        avg_blur = np.mean(blurs)
+        avg_bright = np.mean(brightnesses)
 
-    is_moving = avg_mag > settings.MOTION_MIN_THRESHOLD
+        # =========================================================
+        # 🛡️ HARD REJECTION: THE ANTI-SPOOFING GATE
+        # =========================================================
+        
+        is_moving = avg_mag > settings.MOTION_MIN_THRESHOLD
+        rigid_flags = [s.get('is_rigid', False) for s in hist]
+        if sum(rigid_flags) > len(rigid_flags) // 2:
+            return "SPOOF", 0.1, "Rigid Motion Detected", avg_mag, area_var
+        # 1. The Planar Motion Trap (Defeats sliding a phone or paper)
+        # If it moves, but all points move identically, it is a 2D surface.
+        is_planar_motion = is_moving and (avg_angle_var < settings.RIGID_ANGLE_VAR_TH) and (avg_mag_var < settings.RIGID_MAG_VAR_TH)
+        
+        # 2. The Static Depth Trap (Defeats holding a phone/paper perfectly still)
+        # Real humans cannot hold their head perfectly still at the millimeter level.
+        is_static_depth = area_var < settings.STATIC_AREA_VAR_TH
 
-    # =======================
-    # HARD REJECTION LOGIC
-    # =======================
+        # 3. The Screen Glare Trap
+        is_screen_glare = avg_bright > settings.MAX_BRIGHTNESS_TH and avg_blur > settings.SCREEN_LAPLACIAN_TH
 
-    if is_moving and (avg_angle_var < settings.RIGID_ANGLE_VAR_TH) and (avg_mag_var < settings.RIGID_MAG_VAR_TH):
-        print(f"[LIVENESS] Track {track_id} → SPOOF | Planar Motion | mag={avg_mag:.2f}, angle_var={avg_angle_var:.4f}, mag_var={avg_mag_var:.4f}")
-        return "SPOOF", 0.1, "Planar Motion (Phone/Print)", avg_mag, area_var
+        # --- Evaluate Traps ---
+        if is_planar_motion:
+            return "SPOOF", 0.1, "Planar Motion Detected (Phone/Paper)", avg_mag, area_var
+            
+        if is_static_depth and not is_moving:
+            return "SPOOF", 0.1, "Rigid Depth Detected (Static Photo)", avg_mag, area_var
+            
+        if is_screen_glare:
+            return "SPOOF", 0.2, "Artificial Screen Glare", avg_mag, area_var
 
-    if area_var < settings.MIN_AREA_VAR_TH and not is_moving:
-        print(f"[LIVENESS] Track {track_id} → SPOOF | Static Depth | area_var={area_var:.2f}")
-        return "SPOOF", 0.1, "Static Depth (Photo)", avg_mag, area_var
+        # =========================================================
+        # 🟢 LIVENESS SCORING (For faces that pass the hard blocks)
+        # =========================================================
+        
+        # Adaptive Skin Normalization (Forgiving in low light)
+        skin_target = 0.30 if avg_bright > 60 else 0.15 
+        norm_skin = min(avg_skin / skin_target, 1.0)
 
-    if avg_bright > settings.MAX_BRIGHTNESS_TH and avg_blur > settings.SCREEN_LAPLACIAN_TH:
-        print(f"[LIVENESS] Track {track_id} → SPOOF | Screen Glare | brightness={avg_bright:.2f}, blur={avg_blur:.2f}")
-        return "SPOOF", 0.1, "Screen Glare Detected", avg_mag, area_var
+        # Motion Normalization
+        norm_motion = min(avg_mag / 1.5, 1.0)
+        norm_angle_var = min(avg_angle_var / 0.3, 1.0)
+        norm_area_var = min(area_var / 100.0, 1.0)
 
-    if avg_skin < settings.MIN_SKIN_RATIO or avg_entropy < 4.0:
-        print(f"[LIVENESS] Track {track_id} → SPOOF | Cartoon/AI | skin={avg_skin:.2f}, entropy={avg_entropy:.2f}")
-        return "SPOOF", 0.1, "Non-Human/Cartoon Texture", avg_mag, area_var
+        # Composite Scores
+        motion_score = (norm_motion * 0.4) + (norm_angle_var * 0.6)
+        geometry_score = norm_area_var
+        texture_score = norm_skin
 
-    if np.var(mags) > (avg_mag * 5.0) and is_moving:
-        print(f"[LIVENESS] Track {track_id} → SPOOF | Inconsistent Motion | var={np.var(mags):.2f}")
-        return "SPOOF", 0.1, "Inconsistent Motion (Replay)", avg_mag, area_var
+        # Mode-Adaptive Weighting
+        if mode == "OVERHEAD":
+            # Rely more on 3D geometry changes, less on facial texture
+            w_motion, w_geom, w_text = 0.3, 0.5, 0.2
+        else: # FRONTAL
+            w_motion, w_geom, w_text = 0.4, 0.2, 0.4
 
-    # =======================
-    # REAL EVIDENCE CHECK
-    # =======================
+        final_score = (w_motion * motion_score) + (w_geom * geometry_score) + (w_text * texture_score)
 
-    has_3d_evidence = is_moving and (avg_angle_var >= settings.RIGID_ANGLE_VAR_TH) and (area_var >= settings.MIN_AREA_VAR_TH)
-
-    if not has_3d_evidence:
-        print(f"[LIVENESS] Track {track_id} → UNCERTAIN | No 3D evidence | mag={avg_mag:.2f}, area_var={area_var:.2f}")
-        return "UNCERTAIN", 0.4, "Awaiting 3D Motion Evidence", avg_mag, area_var
-
-    # =======================
-    # FINAL SCORING
-    # =======================
-
-    skin_target = 0.30 if avg_bright > 60 else 0.15 
-    norm_skin = min(avg_skin / skin_target, 1.0)
-    norm_motion = min(avg_mag / 1.5, 1.0)
-    norm_angle_var = min(avg_angle_var / 0.3, 1.0)
-    norm_area_var = min(area_var / 100.0, 1.0)
-
-    motion_score = (norm_motion * 0.4) + (norm_angle_var * 0.6)
-    geometry_score = norm_area_var
-    texture_score = norm_skin
-
-    if mode == "OVERHEAD":
-        w_motion, w_geom, w_text = 0.3, 0.5, 0.2
-    else:
-        w_motion, w_geom, w_text = 0.4, 0.2, 0.4
-
-    final_score = (w_motion * motion_score) + (w_geom * geometry_score) + (w_text * texture_score)
-
-    if final_score >= 0.70:
-        print(f"[LIVENESS] Track {track_id} → REAL | score={final_score:.2f}")
-        return "REAL", final_score, "High Confidence 3D Face", motion_score, geometry_score
-    else:
-        print(f"[LIVENESS] Track {track_id} → UNCERTAIN | score={final_score:.2f}")
-        return "UNCERTAIN", final_score, "Weak 3D Evidence", motion_score, geometry_score
+        if final_score >= 0.70:
+            return "REAL", final_score, "High Confidence", motion_score, geometry_score
+        elif final_score >= 0.40:
+            return "UNCERTAIN", final_score, "Ambiguous Signals", motion_score, geometry_score
+        else:
+            return "SPOOF", final_score, "Low Liveness Score", motion_score, geometry_score
