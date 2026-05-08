@@ -56,6 +56,16 @@ class LivenessEngine:
         # Exposed read-only window of raw signals for the most recent vote.
         # Populated in _temporal_vote(); read by main.py for overlay + diagnostic CSV.
         self.last_signals = {}
+        # Per-track count of consecutive REAL votes. Drives hysteresis on the
+        # rigid-motion hard-reject threshold so confirmed-REAL tracks resist
+        # transient single-window dips into rigidity (e.g., a still moment).
+        # Reset to 0 on every SPOOF return; decayed on UNCERTAIN.
+        self.real_streak = {}
+        # Per-track count of consecutive high-planar-evidence windows. Drives
+        # temporal consistency for the planar-motion gate so a single window
+        # of low-variance optical flow (common on slow forward 3D head motion
+        # at 320x240) does not hard-reject a real user.
+        self.planar_streak = {}
 
     def initialize_track(self, track_id):
         if track_id not in self.history:
@@ -160,27 +170,77 @@ class LivenessEngine:
             'is_moving': bool(is_moving),
         }
 
-        if sum(rigid_flags) > len(rigid_flags) // 2:
+        # === SOFT RIGID FUSION (replaces the legacy `sum > N/2` hard kill) ===
+        # Tier 1 — hard-reject only when rigid_ratio AND avg_angle_var BOTH
+        # corroborate planarity. The original `> N/2` cut sat inside the REAL
+        # right tail at 320x240 (sub-pixel landmark motion collapses per-frame
+        # angle_var below 0.15, inflating rigid_ratio for still real users).
+        # Hysteresis: tracks already confirmed REAL get a stricter bar so a
+        # transient still moment cannot flip an established user to SPOOF.
+        rigid_ratio_local = sum(rigid_flags) / max(1, len(rigid_flags))
+        real_streak = self.real_streak.get(track_id, 0)
+        rigid_hard_th = 0.95 if real_streak >= 3 else 0.85
+
+        if rigid_ratio_local >= rigid_hard_th and avg_angle_var < 0.05:
+            self.real_streak[track_id] = 0
             return "SPOOF", 0.1, "Rigid Motion Detected", avg_mag, area_var
+
+        # Tier 2 — continuous penalty fused into final_score below.
+        # 0.0 below ratio=0.50; ramps linearly to 0.30 at full rigidity.
+        rigid_penalty = max(0.0, rigid_ratio_local - 0.50) * 0.6
+
         # 1. The Planar Motion Trap (Defeats sliding a phone or paper)
-        # If it moves, but all points move identically, it is a 2D surface.
-        is_planar_motion = is_moving and (avg_angle_var < settings.RIGID_ANGLE_VAR_TH) and (avg_mag_var < settings.RIGID_MAG_VAR_TH)
-        
+        # === SOFT PLANAR FUSION (replaces the legacy AND-of-three hard kill) ===
+        # At 320x240, slow uniform 3D head translation produces nearly the same
+        # optical-flow signature as a sliding 2D phone (low ang_var, low mag_var).
+        # We discriminate via:
+        #   (a) corroboration with area_var — phones sliding sideways have
+        #       area_var ~ 0; a real user moving toward camera has area_var > 50.
+        #   (b) temporal consistency — require sustained high evidence across
+        #       consecutive windows.
+        #   (c) hysteresis — confirmed-REAL tracks need MORE evidence to flip.
+        planar_evidence = 0.0
+        if is_moving:
+            if avg_angle_var < 0.03:
+                planar_evidence += 0.6
+            elif avg_angle_var < settings.RIGID_ANGLE_VAR_TH:
+                planar_evidence += 0.3
+            if avg_mag_var < settings.RIGID_MAG_VAR_TH:
+                planar_evidence += 0.2
+            # No-depth-change corroboration (the discriminator a real walker fails).
+            if area_var < settings.STATIC_AREA_VAR_TH:
+                planar_evidence += 0.4
+
+        planar_streak = self.planar_streak.get(track_id, 0)
+        if planar_evidence >= 1.0:
+            planar_streak = planar_streak + 1
+        else:
+            planar_streak = max(0, planar_streak - 1)
+        self.planar_streak[track_id] = planar_streak
+
+        planar_hard_n = 3 if real_streak >= 3 else 2
+        if planar_streak >= planar_hard_n:
+            self.real_streak[track_id] = 0
+            return "SPOOF", 0.1, "Planar Motion Detected (Phone/Paper)", avg_mag, area_var
+
+        # Sub-threshold evidence is fused into final_score as a continuous penalty.
+        planar_penalty = min(planar_evidence, 1.0) * 0.25
+
         # 2. The Static Depth Trap (Defeats holding a phone/paper perfectly still)
         # Real humans cannot hold their head perfectly still at the millimeter level.
         is_static_depth = area_var < settings.STATIC_AREA_VAR_TH
 
         # 3. The Screen Glare Trap
-        is_screen_glare = avg_bright > settings.MAX_BRIGHTNESS_TH and avg_blur > settings.SCREEN_LAPLACIAN_TH
+        is_screen_glare = False
+        #is_screen_glare = avg_bright > settings.MAX_BRIGHTNESS_TH and avg_blur > settings.SCREEN_LAPLACIAN_TH
 
         # --- Evaluate Traps ---
-        if is_planar_motion:
-            return "SPOOF", 0.1, "Planar Motion Detected (Phone/Paper)", avg_mag, area_var
-            
         if is_static_depth and not is_moving:
+            self.real_streak[track_id] = 0
             return "SPOOF", 0.1, "Rigid Depth Detected (Static Photo)", avg_mag, area_var
             
         if is_screen_glare:
+            self.real_streak[track_id] = 0
             return "SPOOF", 0.2, "Artificial Screen Glare", avg_mag, area_var
 
         # =========================================================
@@ -209,10 +269,18 @@ class LivenessEngine:
             w_motion, w_geom, w_text = 0.4, 0.2, 0.4
 
         final_score = (w_motion * motion_score) + (w_geom * geometry_score) + (w_text * texture_score)
+        # Apply the rigid-motion + planar-motion confidence penalties computed
+        # above. Continuous fusion replaces both legacy binary kills: moderate
+        # rigidity / sub-threshold planar evidence nudges the score down, the
+        # other signals can still vote it through if strong.
+        final_score = max(0.0, final_score - rigid_penalty - planar_penalty)
 
         if final_score >= 0.70:
+            self.real_streak[track_id] = real_streak + 1
             return "REAL", final_score, "High Confidence", motion_score, geometry_score
         elif final_score >= 0.40:
+            self.real_streak[track_id] = max(0, real_streak - 1)
             return "UNCERTAIN", final_score, "Ambiguous Signals", motion_score, geometry_score
         else:
+            self.real_streak[track_id] = 0
             return "SPOOF", final_score, "Low Liveness Score", motion_score, geometry_score

@@ -1,67 +1,148 @@
 # enrollment/enroll.py
-import cv2
-import numpy as np
+"""
+Enrollment is now strictly an embedding step. Detection, validation, cropping,
+and 5-point alignment all happen upstream in `preprocess_dataset.py`, which
+writes canonical 112x112 WEBP face crops to `dataset_processed/<identity>/`.
+
+This script:
+    1. scans dataset_processed/<identity>/*.webp
+    2. runs MobileFaceNet on each canonical crop
+    3. L2-normalizes each embedding
+    4. populates BOTH `frontal` and `angled` pools (matches the runtime
+       pose_aware_match() routing — overhead/tilted modes query 'angled' first)
+    5. writes data/known_faces.json **from scratch** (no merge with stale data)
+
+Usage:
+    python -m enrollment.enroll
+"""
+
+from __future__ import annotations
+
 import json
 import os
+import sys
+
+import cv2
+import numpy as np
 import tensorflow as tf
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, '..', 'models')
-DATASET_DIR = os.path.join(BASE_DIR, '..', 'dataset')
-DATA_DIR = os.path.join(BASE_DIR, '..', 'data')
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT  = os.path.abspath(os.path.join(BASE_DIR, '..'))
+MODEL_DIR     = os.path.join(PROJECT_ROOT, 'models')
+DATA_DIR      = os.path.join(PROJECT_ROOT, 'data')
+PROCESSED_DIR = os.path.join(PROJECT_ROOT, 'dataset_processed')
+
+CANONICAL_SIZE = 112
+
 
 class Enroller:
-    def __init__(self, tflite_path, yunet_path):
-        # Initialize YuNet
-        self.detector = cv2.FaceDetectorYN.create(
-            yunet_path, "", (320, 320), 0.9, 0.3, 5000
-        )
-        # Initialize MobileFaceNet TFLite
+    """Thin wrapper around MobileFaceNet TFLite. No YuNet, no alignment —
+    those happen in preprocess_dataset.py."""
+
+    def __init__(self, tflite_path: str) -> None:
         self.interpreter = tf.lite.Interpreter(model_path=tflite_path)
         self.interpreter.allocate_tensors()
-        self.input_idx = self.interpreter.get_input_details()[0]['index']
+        self.input_idx  = self.interpreter.get_input_details()[0]['index']
         self.output_idx = self.interpreter.get_output_details()[0]['index']
-        self.db = {}
 
-    def extract_embedding(self, face_crop):
-        face_crop = cv2.resize(face_crop, (112, 112))
-        input_tensor = (np.float32(face_crop) - 127.5) / 128.0
-        input_tensor = np.expand_dims(input_tensor, axis=0)
-        self.interpreter.set_tensor(self.input_idx, input_tensor)
+    def extract_embedding(self, face_bgr: np.ndarray) -> list[float]:
+        """Expects a canonical 112x112 BGR aligned face (as produced by
+        preprocess_dataset.py). Resizes defensively if the input differs."""
+        if face_bgr.shape[:2] != (CANONICAL_SIZE, CANONICAL_SIZE):
+            face_bgr = cv2.resize(face_bgr, (CANONICAL_SIZE, CANONICAL_SIZE))
+        x = (np.float32(face_bgr) - 127.5) / 128.0
+        x = np.expand_dims(x, axis=0)
+        self.interpreter.set_tensor(self.input_idx, x)
         self.interpreter.invoke()
-        embedding = self.interpreter.get_tensor(self.output_idx)[0]
-        return (embedding / np.linalg.norm(embedding)).tolist() # Normalize L2
+        emb = self.interpreter.get_tensor(self.output_idx)[0]
+        return (emb / np.linalg.norm(emb)).tolist()
 
-    # FIX-9: Adding a default pose parameter. If unknown, we replicate embeddings into both arrays.
-    def enroll_user(self, name, image_paths, pose="frontal"):
-        self.db[name] = {"frontal": [], "angled": []}
-        for path in image_paths:
+
+# -----------------------------------------------------------------------------
+# IO
+# -----------------------------------------------------------------------------
+def list_processed(processed_dir: str) -> dict[str, list[str]]:
+    """Return {identity: [webp_path, ...]} from dataset_processed/."""
+    out: dict[str, list[str]] = {}
+    if not os.path.isdir(processed_dir):
+        return out
+    for entry in sorted(os.scandir(processed_dir), key=lambda e: e.name):
+        if not entry.is_dir():
+            continue
+        webps = sorted(
+            p.path for p in os.scandir(entry.path)
+            if p.is_file() and p.name.lower().endswith('.webp')
+        )
+        if webps:
+            out[entry.name] = webps
+    return out
+
+
+# -----------------------------------------------------------------------------
+# Driver
+# -----------------------------------------------------------------------------
+def build_db(processed_dir: str, tflite_path: str, out_path: str) -> None:
+    identities = list_processed(processed_dir)
+    if not identities:
+        print(f"[ERROR] No identities under {processed_dir}.")
+        print(f"        Run `python preprocess_dataset.py` first.")
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f"  Source : {processed_dir}")
+    print(f"  Output : {out_path}")
+    print(f"  Identities: {len(identities)}")
+    for name, paths in identities.items():
+        print(f"    {name}: {len(paths)} canonical face(s)")
+    print(f"{'=' * 60}\n")
+
+    enroller = Enroller(tflite_path)
+    db: dict[str, dict[str, list]] = {}
+    total_ok = total_skip = 0
+
+    for name, paths in identities.items():
+        print(f"--- Embedding: {name} ({len(paths)} face(s)) ---")
+        embs: list[list[float]] = []
+        for path in paths:
             img = cv2.imread(path)
-            h, w = img.shape[:2]
-            self.detector.setInputSize((w, h))
-            _, faces = self.detector.detect(img)
-            
-            if faces is not None:
-                box = list(map(int, faces[0][:4]))
-                # Crop and embed (Simplified here, assumes alignment is done)
-                crop = img[box[1]:box[1]+box[3], box[0]:box[0]+box[2]]
-                emb = self.extract_embedding(crop)
-                
-                # FIX-9: Populating both frontal and angled arrays so pipeline matching 
-                # (which checks 'angled' by default on overhead cameras) never queries an empty list.
-                if pose == "frontal":
-                    self.db[name]["frontal"].append(emb)
-                    self.db[name]["angled"].append(emb)
-                else:
-                    self.db[name]["angled"].append(emb)
+            if img is None:
+                print(f"  [SKIP] unreadable: {os.path.basename(path)}")
+                total_skip += 1
+                continue
+            try:
+                emb = enroller.extract_embedding(img)
+            except Exception as e:
+                print(f"  [SKIP] embed_failed ({e}): {os.path.basename(path)}")
+                total_skip += 1
+                continue
+            embs.append(emb)
+            total_ok += 1
+            print(f"  [OK]   {os.path.basename(path)}")
 
-        with open('../data/known_faces.json', 'w') as f:
-            json.dump(self.db, f)
-        print(f"Enrolled {name} with {len(image_paths)} embeddings.")
+        # Replicate into both pose pools so pose_aware_match never queries
+        # an empty list (its OVERHEAD/TILTED branch hits 'angled' first).
+        db[name] = {"frontal": list(embs), "angled": list(embs)}
+        print(f"  => stored {len(embs)} embeddings (frontal & angled)\n")
 
+    # Source of truth is dataset_processed/. We do NOT merge with any prior
+    # known_faces.json — preprocessing is now the canonical input.
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w') as fh:
+        json.dump(db, fh)
+
+    print(f"{'=' * 60}")
+    print(f"  Enrollment complete.")
+    print(f"  Identities : {len(db)}")
+    print(f"  Embeddings : {total_ok}")
+    print(f"  Skipped    : {total_skip}")
+    print(f"  Output     : {out_path}")
+    print(f"{'=' * 60}\n")
+
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Example usage
     tflite_path = os.path.join(MODEL_DIR, 'mobilefacenet.tflite')
-    yunet_path = os.path.join(MODEL_DIR, 'yunet.onnx')
-    enroller = Enroller(tflite_path, yunet_path)
-    # enroller.enroll_user("john_doe", ["img1.jpg", "img2.jpg", "img3.jpg", "img4.jpg", "img5.jpg"])
+    out_path    = os.path.join(DATA_DIR,  'known_faces.json')
+    build_db(PROCESSED_DIR, tflite_path, out_path)

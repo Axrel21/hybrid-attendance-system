@@ -49,6 +49,60 @@ def calculate_iou(boxA, boxB):
 
     return interArea / float(boxAArea + boxBArea - interArea + 1e-5)
 
+# ✅ NEW: Pre-tracker suppression of nested / duplicate YuNet detections.
+def suppress_overlapping(faces, iou_th=0.45, iomin_th=0.70):
+    """
+    Greedy post-pass over YuNet output.
+
+    Standard IoU-NMS (which YuNet already runs internally at 0.30) does not
+    catch the nested-box case: when a small box is fully inside a large one,
+    IoU = area(small) / area(large) can sit well below the NMS threshold.
+    Phone-replay frames routinely produce such pairs (face inside bezel,
+    low-scale anchor inside high-scale anchor, on-screen reflection inside
+    primary face).
+
+    Adds one extra criterion on top of standard IoU:
+        IoMin = intersection / min(area_A, area_B)
+    which is ~1.0 for any nested pair regardless of the size ratio.
+
+    Args:
+        faces:  numpy array (N,15) from cv2.FaceDetectorYN.detect, or None.
+                Columns: [x, y, w, h, 5x(lx,ly), score]. Score is the last col.
+        iou_th: redundant safety net vs YuNet's internal NMS (kept loose)
+        iomin_th: containment threshold; lower = more aggressive nest removal
+
+    Returns:
+        Same dtype/shape contract as `faces` (ndarray or None), with the
+        lower-scoring partner of every overlapping/nested pair removed.
+    """
+    if faces is None or len(faces) == 0:
+        return faces
+
+    scores = faces[:, -1] if faces.shape[1] >= 15 else np.ones(len(faces))
+    order = np.argsort(-scores)  # highest confidence first
+    kept = []
+    for idx in order:
+        f = faces[idx]
+        bx, by, bw, bh = float(f[0]), float(f[1]), float(f[2]), float(f[3])
+        b_area = max(1.0, bw * bh)
+        suppressed = False
+        for kf in kept:
+            kx, ky, kw, kh = float(kf[0]), float(kf[1]), float(kf[2]), float(kf[3])
+            k_area = max(1.0, kw * kh)
+            ix1 = max(bx, kx); iy1 = max(by, ky)
+            ix2 = min(bx + bw, kx + kw); iy2 = min(by + bh, ky + kh)
+            iw = max(0.0, ix2 - ix1); ih = max(0.0, iy2 - iy1)
+            inter = iw * ih
+            iou = inter / (b_area + k_area - inter + 1e-6)
+            iomin = inter / min(b_area, k_area)
+            if iou > iou_th or iomin > iomin_th:
+                suppressed = True
+                break
+        if not suppressed:
+            kept.append(f)
+    return np.array(kept) if kept else None
+
+
 # ✅ NEW: Robust Landmark/Face Matcher
 def find_best_face_match(tracker_box, detected_faces, iou_threshold=0.3):
     """ Finds the detected face that best overlaps with the tracker's bounding box. """
@@ -77,7 +131,13 @@ class FinalHybridEdge:
         if settings.SIMULATE_PI:
             cv2.setNumThreads(settings.PI_MAX_THREADS)
 
-        self.yunet = cv2.FaceDetectorYN.create(model_path1, "", (320, 240), 0.8, 0.3, 5000)
+        # Detector runs at 640x480 to recover landmark / bbox spatial fidelity
+        # for distant and multi-face scenes. Downstream (alignment, embedding,
+        # liveness optical flow) operates on cropped face regions of fixed
+        # 112x112 size, so embedding compute does NOT scale with capture
+        # resolution. The only added per-frame cost is YuNet itself + one
+        # full-frame BGR->Gray conversion, both Pi4-real-time-feasible.
+        self.yunet = cv2.FaceDetectorYN.create(model_path1, "", (640, 480), 0.8, 0.3, 5000)
         
         self.interpreter = tf.lite.Interpreter(model_path=model_path2)
         if settings.SIMULATE_PI and hasattr(self.interpreter, "set_num_threads"):
@@ -136,17 +196,32 @@ class FinalHybridEdge:
     def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
         """Draw the per-track debug overlay. Always called, regardless of
         which gate the pipeline exited on, via the try/finally in run()."""
+       
         lbl = dbg['lbl']
-        if lbl == "REAL":
-            color = (0, 255, 0)
-        elif lbl == "SPOOF":
-            color = (0, 0, 255)
-        elif lbl == "UNCERTAIN":
-            color = (0, 255, 255)
-        elif lbl == "ANALYZING":
-            color = (255, 200, 0)
+
+        if dbg['decision'] == 'NO_MATCH':
+            return
+
+        # NOTE: previously had `if fw * fh < 2500: return` here. That hid every
+        # validated face below 50x50 from the overlay (distant attendees).
+        # Removed: is_valid_face already enforces the >=36x36 floor before any
+        # detection reaches the overlay path, so this filter was redundant
+        # AND was masking exactly the multi-face / far-face scenarios we're
+        # trying to debug. The pipeline-level processing was never affected.
+
+
+        # Color is derived from the pipeline DECISION (user-facing trust state),
+        # not from the liveness label. This prevents internal debug states such
+        # as UNCERTAIN/ANALYZING/BUFFERING from producing misleading yellow/orange
+        # boxes that appear accepted when no recognition decision has been made.
+        decision = dbg['decision']
+        if decision in ('MATCHED', 'OFFLOAD_TO_CLOUD'):
+            color = (0, 255, 0)        # green  — identity confirmed or escalated
+        elif decision in ('REJECTED_LIVENESS', 'OUT_OF_RANGE') or lbl == 'SPOOF':
+            color = (0, 0, 255)        # red    — active rejection
         else:
-            color = (200, 200, 200)
+            # BUFFERING, BELOW_THRESHOLD, UNCERTAIN, ANALYZING, NONE, NA
+            color = (180, 180, 180)    # grey   — neutral / insufficient data
 
         info_lines = [
             f"ID:{track_id} {dbg['mode']} d:{dbg['distance']:.2f}m",
@@ -154,7 +229,7 @@ class FinalHybridEdge:
             f"sim:{dbg['sim']:.2f}/th:{dbg['th_high']:.2f}  {dbg['identity']}",
             f"mag:{dbg['avg_mag']:.2f}  angV:{dbg['avg_ang_var']:.3f}  magV:{dbg['avg_mag_var']:.2f}",
             f"rigid:{dbg['rigid_ratio']:.2f}  areaV:{dbg['avg_area_var']:.0f}",
-            f"D:{dbg['decision']}",
+            f"D:{decision}",
             f"R:{dbg['rsn']}",
         ]
         cv2.rectangle(frame, (x, y), (x + fw, y + fh), color, 2)
@@ -179,8 +254,12 @@ class FinalHybridEdge:
     def run(self):
         cap = cv2.VideoCapture(0)
         if settings.SIMULATE_PI:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+            # 640x480 capture restores spatial fidelity for far-face landmarks
+            # without exploding embedding compute (embeddings remain on the
+            # fixed 112x112 aligned crop). Pi realism preserved: the heavy
+            # work (YuNet + cvtColor) scales 4x but stays in real-time budget.
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             
         prev_gray = None
 
@@ -205,11 +284,21 @@ class FinalHybridEdge:
             # 3. Detect (Ensure we are passing the BGR 'frame', NOT 'curr_gray')
             # ... (Inside the while True loop)
             _, faces = self.yunet.detect(frame)
-            
+
+            # 3b. Pre-tracker suppression of nested / duplicate detections that
+            # YuNet's internal IoU-NMS cannot remove by construction. See
+            # suppress_overlapping() docstring for the IoMin rationale. This is
+            # the single intervention that stabilises tracker IDs against phone
+            # replay artifacts; everything downstream (validation, tracker,
+            # liveness, diagnostics) is unchanged.
+            raw_count = 0 if faces is None else len(faces)
+            faces = suppress_overlapping(faces)
+            kept_count = 0 if faces is None else len(faces)
+
             # 4. Print raw debug data to console
             print(f"[DEBUG] Frame: {w}x{h}, Channels: {frame.shape[2] if len(frame.shape)>2 else 1}")
             print(f"[DEBUG] Raw faces output type: {type(faces)}")
-            print(f"[DEBUG] Faces found: {0 if faces is None else len(faces)}")
+            print(f"[DEBUG] Faces found: {kept_count} (raw {raw_count}, suppressed {raw_count - kept_count})")
 
             rects = []
             valid_faces = [] # 🟢 ADD THIS: Keep track of the full face data that passed validation
@@ -223,11 +312,11 @@ class FinalHybridEdge:
                     raw_landmarks = [(int(f[4+2*j]), int(f[4+2*j+1])) for j in range(5)]
                     
                     if not is_valid_face(crop, raw_landmarks, (rx, ry, rw, rh), w, h):
-                        cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (100, 100, 100), 1)
+                        #cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (100, 100, 100), 1)
                         continue 
                     # ---------------------------------
                     
-                    cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (255, 0, 0), 1)
+                    #cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (255, 0, 0), 1)
                     rects.append((rx, ry, rw, rh))
                     valid_faces.append(f) # 🟢 ADD THIS: Store the valid raw face data
                     
@@ -258,6 +347,8 @@ class FinalHybridEdge:
                         self.embedding_buffers.pop(track_id, None)
                         self.liveness.history.pop(track_id, None)
                         self.liveness.last_signals.pop(track_id, None)
+                        self.liveness.real_streak.pop(track_id, None)
+                        self.liveness.planar_streak.pop(track_id, None)
                         dbg['rsn'] = 'No detection match'
                         dbg['decision'] = 'NO_MATCH'
                         continue
@@ -294,9 +385,21 @@ class FinalHybridEdge:
                     dbg['avg_area_var'] = float(sig.get('avg_area_var', 0.0))
                     dbg['rigid_ratio'] = float(sig.get('rigid_ratio', 0.0))
 
-                    if lbl != "REAL":
+                    # Only a confirmed SPOOF invalidates the embedding buffer.
+                    # UNCERTAIN / ANALYZING are transient "we don't know" states
+                    # produced by the soft rigid+planar fusion patches — wiping
+                    # the buffer on them resets the 8-frame embedding window
+                    # every time the liveness signal flickers, which is why
+                    # MATCHED was unreachable.
+                    if lbl == "SPOOF":
                         self.embedding_buffers.pop(track_id, None)
                         dbg['decision'] = 'REJECTED_LIVENESS'
+                        continue
+                    if lbl != "REAL":
+                        # ANALYZING / UNCERTAIN: hold the buffer, don't append,
+                        # don't wipe. Decision label routes to the grey/neutral
+                        # overlay color (per the user-facing color mapping).
+                        dbg['decision'] = lbl
                         continue
 
                     if track_id not in self.embedding_buffers:
@@ -361,6 +464,8 @@ class FinalHybridEdge:
                     self._write_diag(loop_start, w, h, track_id, dbg)
                 
             prev_gray = curr_gray.copy()
+            cv2.namedWindow("Hybrid Edge Pipeline", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Hybrid Edge Pipeline", 720, 540)
             cv2.imshow("Hybrid Edge Pipeline", frame)
             
             # FIX 13: Accurate Pi Simulation Logic
