@@ -238,6 +238,10 @@ __pycache__/
 venv/
 .env
 
+# models
+models/*.tflite
+models/*.onnx
+
 # OS junk
 .DS_Store
 Thumbs.db
