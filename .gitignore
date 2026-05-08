@@ -217,14 +217,27 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-models/
-data/
-dataset/
+# datasets
 dataset_raw/
 dataset_processed/
-.cursor
 
-*.onnx
-*.tflite
-*.pkl
+# biometric DB
+data/known_faces.json
+data/known_faces.OLD_UNALIGNED.json
+
+# diagnostics
+*.csv
+logs/
+diagnostics/
+
+# python cache
 __pycache__/
+*.pyc
+
+# virtual env
+venv/
+.env
+
+# OS junk
+.DS_Store
+Thumbs.db
