@@ -125,6 +125,64 @@ def find_best_face_match(tracker_box, detected_faces, iou_threshold=0.3):
         
     return None # Fallback if no good match is found (e.g., face occluded this frame)
 
+# --- Diagnostic CSV schema ---
+# Single source of truth for the diagnostic_log.csv header. The legacy
+# columns (up through latency_ms) are preserved verbatim so analyze_diag.py
+# and any external schema readers keep working. The new orientation /
+# calibration columns are appended at the end.
+#
+# When the runtime starts and finds an existing diagnostic_log.csv whose
+# header doesn't match this list, the file is renamed aside as
+# diagnostic_log.archived_<timestamp>.csv and a fresh log is started, so
+# experimental runs never mix schemas.
+DIAG_COLUMNS = [
+    # legacy block — DO NOT reorder, downstream consumers depend on it
+    "timestamp", "frame_w", "frame_h", "track_id",
+    "lbl", "live_conf", "reason", "decision",
+    "mode", "distance", "brightness",
+    "avg_mag", "avg_ang_var", "avg_mag_var", "avg_area_var", "rigid_ratio",
+    "m_score", "g_score",
+    "identity", "sim", "th_high", "th_mid",
+    "latency_ms",
+    # orientation calibration block
+    "face_w", "face_h",
+    "mode_raw", "orient_ratio", "eye_dist_px", "vertical_dist_px",
+    # recognition pool tracing
+    "pool_used", "pool_size", "num_identities",
+    # session tag (set via EXPERIMENT_LABEL env var; empty for ad-hoc runs)
+    "experiment_label",
+]
+
+
+def _rotate_diag_if_schema_changed(path, expected_columns):
+    """
+    Auto-rotate the diagnostic CSV when its header doesn't match the
+    current schema. Returns True if a fresh file should be opened (i.e.
+    the existing file was missing/empty/rotated), False if the existing
+    file's header already matches and we can append.
+    """
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return True
+
+    try:
+        with open(path, "r", newline="") as f:
+            header = next(csv.reader(f), [])
+    except Exception:
+        # Unreadable → preserve it under a debug name and start fresh
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        os.rename(path, path.replace(".csv", f".unreadable_{ts}.csv"))
+        return True
+
+    if header == expected_columns:
+        return False
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    archived = path.replace(".csv", f".archived_{ts}.csv")
+    os.rename(path, archived)
+    print(f"[DIAG] schema changed -> archived previous log to {os.path.basename(archived)}")
+    return True
+
+
 class FinalHybridEdge:
     def __init__(self):
         # Configure OpenCV for strict edge simulation
@@ -171,19 +229,16 @@ class FinalHybridEdge:
 
         # Per-frame, per-track diagnostic log. Decoupled from the attendance
         # log so analyze_results.py and existing schemas keep working.
-        diag_exists = os.path.isfile(diag_path) and os.path.getsize(diag_path) > 0
+        # Schema is auto-rotated if it has changed (e.g. orientation
+        # calibration columns added) so we never silently mix schemas.
+        write_header = _rotate_diag_if_schema_changed(diag_path, DIAG_COLUMNS)
         self.diag_file = open(diag_path, 'a', newline='')
         self.diag_writer = csv.writer(self.diag_file)
-        if not diag_exists:
-            self.diag_writer.writerow([
-                "timestamp", "frame_w", "frame_h", "track_id",
-                "lbl", "live_conf", "reason", "decision",
-                "mode", "distance", "brightness",
-                "avg_mag", "avg_ang_var", "avg_mag_var", "avg_area_var", "rigid_ratio",
-                "m_score", "g_score",
-                "identity", "sim", "th_high", "th_mid",
-                "latency_ms",
-            ])
+        if write_header:
+            self.diag_writer.writerow(DIAG_COLUMNS)
+
+        if settings.EXPERIMENT_LABEL:
+            print(f"[EXPERIMENT] tagging session as '{settings.EXPERIMENT_LABEL}'")
 
     def extract_embedding(self, face_img):
         input_tensor = (np.float32(face_img) - 127.5) / 128.0
@@ -236,9 +291,16 @@ class FinalHybridEdge:
         draw_debug_info(frame, x + fw + 8, max(20, y), info_lines, color)
 
     def _write_diag(self, loop_start, frame_w, frame_h, track_id, dbg):
-        """Append one diagnostic row per (frame, track), regardless of decision."""
+        """Append one diagnostic row per (frame, track), regardless of decision.
+
+        Column order MUST track DIAG_COLUMNS exactly. The legacy block is
+        preserved for analyze_diag.py compatibility; orientation,
+        recognition-pool, and experiment-label columns are appended at
+        the end for the calibration/validation analyses.
+        """
         latency_ms = (time.time() - loop_start) * 1000
         self.diag_writer.writerow([
+            # legacy block
             round(time.time(), 3), frame_w, frame_h, track_id,
             dbg['lbl'], round(dbg['live_conf'], 3), dbg['rsn'], dbg['decision'],
             dbg['mode'], round(dbg['distance'], 3), round(dbg['brightness'], 1),
@@ -249,6 +311,14 @@ class FinalHybridEdge:
             dbg['identity'], round(dbg['sim'], 3),
             round(dbg['th_high'], 3), round(dbg['th_mid'], 3),
             round(latency_ms, 1),
+            # orientation calibration block
+            int(dbg['face_w']), int(dbg['face_h']),
+            dbg['mode_raw'], round(dbg['orient_ratio'], 4),
+            round(dbg['eye_dist_px'], 2), round(dbg['vertical_dist_px'], 2),
+            # recognition pool tracing
+            dbg['pool_used'], int(dbg['pool_size']), int(dbg['num_identities']),
+            # session tag
+            settings.EXPERIMENT_LABEL,
         ])
 
     def run(self):
@@ -295,10 +365,11 @@ class FinalHybridEdge:
             faces = suppress_overlapping(faces)
             kept_count = 0 if faces is None else len(faces)
 
-            # 4. Print raw debug data to console
-            print(f"[DEBUG] Frame: {w}x{h}, Channels: {frame.shape[2] if len(frame.shape)>2 else 1}")
-            print(f"[DEBUG] Raw faces output type: {type(faces)}")
-            print(f"[DEBUG] Faces found: {kept_count} (raw {raw_count}, suppressed {raw_count - kept_count})")
+            # 4. Print raw debug data to console (gated; always written to CSV)
+            if settings.VERBOSE_DEBUG:
+                print(f"[DEBUG] Frame: {w}x{h}, Channels: {frame.shape[2] if len(frame.shape)>2 else 1}")
+                print(f"[DEBUG] Raw faces output type: {type(faces)}")
+                print(f"[DEBUG] Faces found: {kept_count} (raw {raw_count}, suppressed {raw_count - kept_count})")
 
             rects = []
             valid_faces = [] # 🟢 ADD THIS: Keep track of the full face data that passed validation
@@ -337,6 +408,13 @@ class FinalHybridEdge:
                     'sim': 0.0, 'identity': 'NA',
                     'th_high': 0.0, 'th_mid': 0.0,
                     'decision': 'NONE',
+                    # orientation calibration fields
+                    'face_w': fw, 'face_h': fh,
+                    'mode_raw': 'NA', 'orient_ratio': 0.0,
+                    'eye_dist_px': 0.0, 'vertical_dist_px': 0.0,
+                    # recognition pool tracing
+                    'pool_used': 'NA', 'pool_size': 0,
+                    'num_identities': len(self.controller.db),
                 }
 
                 try:
@@ -359,6 +437,16 @@ class FinalHybridEdge:
                     # ... [The rest of your pipeline (Pose, Liveness, Embeddings, Match) remains EXACTLY the same] ...
                     mode = self.pose_est.estimate_mode(track_id, landmarks)
                     dbg['mode'] = mode
+
+                    # Surface raw geometric metrics from the orientation
+                    # estimator for offline calibration. Behaviour of the
+                    # classifier itself is unchanged — we only read what
+                    # it just computed.
+                    orient_meta = self.pose_est.last_metrics.get(track_id, {})
+                    dbg['mode_raw'] = orient_meta.get('mode_raw', 'NA')
+                    dbg['orient_ratio'] = float(orient_meta.get('ratio', 0.0))
+                    dbg['eye_dist_px'] = float(orient_meta.get('eye_dist', 0.0))
+                    dbg['vertical_dist_px'] = float(orient_meta.get('vertical_dist', 0.0))
 
                     distance = settings.K_FOCAL / (np.sqrt(fw * fh) + 1e-5)
                     dbg['distance'] = float(distance)
@@ -428,6 +516,14 @@ class FinalHybridEdge:
                     identity, sim = self.controller.pose_aware_match(mean_emb, mode)
                     dbg['identity'] = identity
                     dbg['sim'] = float(sim)
+
+                    # Carry forward which embedding pool actually drove
+                    # the match (frontal / angled / frontal_fallback) so
+                    # the analyzer can split sim distributions per pool.
+                    match_meta = self.controller.last_match_meta or {}
+                    dbg['pool_used'] = match_meta.get('pool_used', 'NA')
+                    dbg['pool_size'] = int(match_meta.get('pool_size', 0))
+                    dbg['num_identities'] = int(match_meta.get('num_identities', dbg['num_identities']))
 
                     # FIX 8: Adaptive Thresholds
                     brightness = np.mean(curr_gray[y:y+fh, x:x+fw])
