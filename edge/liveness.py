@@ -86,18 +86,24 @@ class LivenessEngine:
         
         return skin_ratio, entropy, gray
 
-    def assess_frame(self, track_id, current_mode, prev_gray, frame, curr_box, landmarks):
+    def assess_frame(self, track_id, current_mode, prev_gray, curr_gray, frame, curr_box, landmarks):
+        """Assess a single frame for liveness.
+
+        curr_gray is the full-frame grayscale image, already computed by
+        the main loop. Accepting it as a parameter avoids the redundant
+        BGR->Gray conversion that previously happened here (P2 bottleneck fix).
+        """
         self.initialize_track(track_id)
         x, y, w, h = curr_box
         bgr_crop = frame[y:y+h, x:x+w]
-        
+
         stats = {} # FIX-5: Declared stats dictionary early to prevent NameError
-        
+
         if prev_gray is not None:
-            curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # curr_gray is provided by the caller — no re-conversion needed.
             motion_score, ang_var, mag_var, rigid_flag = analyze_motion(
-                prev_gray, curr_gray, landmarks, 
-                threshold_angle=settings.RIGID_ANGLE_VAR_TH, 
+                prev_gray, curr_gray, landmarks,
+                threshold_angle=settings.RIGID_ANGLE_VAR_TH,
                 threshold_mag=settings.RIGID_MAG_VAR_TH
             )
     

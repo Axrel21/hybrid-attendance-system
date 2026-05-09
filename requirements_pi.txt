@@ -1,0 +1,33 @@
+# Raspberry Pi 4 deployment requirements
+# Target: Raspberry Pi OS Bookworm 64-bit (aarch64), Python 3.10+
+#
+# Setup:
+#   python3 -m venv ~/attendance/venv
+#   source ~/attendance/venv/bin/activate
+#   pip install -r requirements_pi.txt
+#
+# Do NOT mix with the system-level python3-numpy from apt;
+# always activate the virtualenv before running anything.
+
+# --- Inference (replaces tensorflow-cpu which has no ARM64 PyPI wheel) ---
+tflite-runtime>=2.13.0
+
+# --- Computer Vision ---
+# If a display (HDMI or VNC) is connected, use opencv-python instead.
+# For headless deployments with HEADLESS=1, opencv-python-headless is fine.
+opencv-python-headless==4.8.0.76
+
+# --- Numerical ---
+numpy>=1.24.3
+
+# --- Tracker ---
+scipy==1.10.1
+
+# --- Camera ---
+# Picamera2 supports Pi Camera Module 2 via the libcamera stack on
+# Bullseye and Bookworm. With CAMERA_BACKEND=opencv the V4L2 path is
+# used instead; Picamera2 is still imported lazily so it must be present.
+picamera2>=0.3.12
+
+# --- Performance instrumentation ---
+psutil>=5.9.0

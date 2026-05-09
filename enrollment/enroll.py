@@ -24,7 +24,15 @@ import sys
 
 import cv2
 import numpy as np
-import tensorflow as tf
+
+# TFLite runtime shim: use the lightweight tflite-runtime package on Pi
+# (ARM64, no full TF wheel available on PyPI); fall back to the full
+# tensorflow package on the development machine.
+try:
+    from tflite_runtime.interpreter import Interpreter as TFLiteInterpreter
+except ImportError:
+    import tensorflow as tf
+    TFLiteInterpreter = tf.lite.Interpreter
 
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT  = os.path.abspath(os.path.join(BASE_DIR, '..'))
@@ -40,7 +48,7 @@ class Enroller:
     those happen in preprocess_dataset.py."""
 
     def __init__(self, tflite_path: str) -> None:
-        self.interpreter = tf.lite.Interpreter(model_path=tflite_path)
+        self.interpreter = TFLiteInterpreter(model_path=tflite_path)
         self.interpreter.allocate_tensors()
         self.input_idx  = self.interpreter.get_input_details()[0]['index']
         self.output_idx = self.interpreter.get_output_details()[0]['index']

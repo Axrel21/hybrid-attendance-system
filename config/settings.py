@@ -40,7 +40,7 @@ STATIC_AREA_VAR_TH = 20.0      # was 50.0; narrows the photo-frozen trap to trul
 UNREAL_AREA_VAR_TH = 5000.0    # Reject glitchy tracking jumps
 MIN_SKIN_RATIO = 0.15          # Reject screens/masks with low skin
 MAX_BRIGHTNESS_TH = 180
-SCREEN_LAPLACIAN_TH = 80
+# NOTE: duplicate SCREEN_LAPLACIAN_TH = 80 removed (was silently overwriting the 80.0 above)
 
 # Set Environment Variables for Simulation
 if SIMULATE_PI:
@@ -100,3 +100,43 @@ EXPERIMENT_LABEL = os.environ.get("EXPERIMENT_LABEL", "")
 #     $env:VERBOSE_DEBUG=1                  - keep them (default)
 # Structured CSV logging is unaffected either way.
 VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "1") not in ("0", "false", "False", "")
+
+# =====================================================================
+# Raspberry Pi deployment flags
+# =====================================================================
+# HEADLESS — skip all cv2.imshow / cv2.namedWindow / cv2.waitKey calls.
+# Required when running without a connected display (SSH, systemd service).
+# Set via env var to avoid code edits:
+#     export HEADLESS=1   (bash)   $env:HEADLESS=1 (PowerShell)
+HEADLESS = os.environ.get("HEADLESS", "0") not in ("0", "false", "False", "")
+
+# CAMERA_BACKEND — selects the frame-acquisition backend:
+#   "opencv"    — cv2.VideoCapture(0); works on laptop / USB webcam
+#   "picamera2" — Picamera2 via libcamera; required for Pi Camera Module 2
+CAMERA_BACKEND = os.environ.get("CAMERA_BACKEND", "opencv")
+
+# =====================================================================
+# SD-card I/O coalescing (Pi deployment)
+# =====================================================================
+# Open CSV log files with a write-buffer of this size (bytes).
+# Reduces per-row fsync pressure on the SD card.
+LOG_BUFFER_SIZE = 8192
+
+# Flush the write buffer to disk every N frames (~every 2s at 15fps).
+# Lower values reduce data loss on power-cut; higher values reduce I/O.
+LOG_FLUSH_INTERVAL = 30
+
+# Auto-rotate diagnostic_log.csv when it exceeds this size (MB).
+# Keeps the SD card from filling up during long calibration sessions.
+DIAG_MAX_SIZE_MB = 50.0
+
+# =====================================================================
+# Performance instrumentation (Phase 5)
+# =====================================================================
+# Rolling FPS window: number of past frame timestamps to average over.
+FPS_WINDOW = 30
+
+# System-resource sampling interval: sample CPU%, RAM, and temperature
+# every N frames (psutil calls have non-trivial overhead; don't call
+# every frame).
+PERF_SAMPLE_INTERVAL = 10
