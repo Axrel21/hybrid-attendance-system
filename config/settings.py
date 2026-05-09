@@ -64,3 +64,39 @@ MOTION_MIN_THRESHOLD = 0.35    # was 0.5; lets near-still real users qualify as 
                                # mildly increases Gate A pressure. Combined with Tier 2, net REAL
                                # acceptance still improves. If you observe rigid_ratio drift upward
                                # for REAL after this change, revert to 0.5.
+
+# =====================================================================
+# Orientation / Pose Heuristic (validation + calibration knobs)
+# =====================================================================
+# The orientation subsystem in edge/orientation.py classifies each face
+# into FRONTAL / TILTED / OVERHEAD using the geometric ratio
+#     ratio = vertical_dist(eye_center -> mouth_center) / eye_dist
+# Centralised here so the thresholds can be calibrated experimentally
+# from data/diagnostic_log.csv without touching the runtime code.
+#
+#   ratio < ORIENTATION_OVERHEAD_TH               -> OVERHEAD
+#   ORIENTATION_OVERHEAD_TH <= ratio < ORIENTATION_TILTED_TH -> TILTED
+#   ratio >= ORIENTATION_TILTED_TH                -> FRONTAL
+#
+# Defaults (0.60 / 0.90) preserve the original behaviour exactly.
+ORIENTATION_OVERHEAD_TH = 0.60
+ORIENTATION_TILTED_TH   = 0.915
+ORIENTATION_SMOOTHING_WINDOW = 5  # majority-vote temporal window length
+
+# Free-form label stamped on every diagnostic row for the duration of a
+# capture session. Pulled from the EXPERIMENT_LABEL env var so a single
+# command-line export ('frontal_2m', 'overhead_3m', 'tilted_close', ...)
+# tags every row in data/diagnostic_log.csv for that run, making them
+# separable in offline analysis. Empty string disables the tag.
+EXPERIMENT_LABEL = os.environ.get("EXPERIMENT_LABEL", "")
+
+# =====================================================================
+# Diagnostic Print Verbosity
+# =====================================================================
+# Per-frame [REC]/[DEBUG] prints are useful when iterating but pollute
+# logs during multi-minute calibration sessions. Toggle via env var so
+# experimental runs stay quiet without code edits:
+#     $env:VERBOSE_DEBUG=0   (PowerShell)  - silence per-frame prints
+#     $env:VERBOSE_DEBUG=1                  - keep them (default)
+# Structured CSV logging is unaffected either way.
+VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "1") not in ("0", "false", "False", "")

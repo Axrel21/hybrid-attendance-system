@@ -1,0 +1,16 @@
+ORIENTATION THRESHOLD CALIBRATION
+==================================================
+
+Currently configured:
+  ORIENTATION_OVERHEAD_TH = 0.600
+  ORIENTATION_TILTED_TH   = 0.900
+
+Suggested (from empirical distribution):
+  ORIENTATION_OVERHEAD_TH = 0.600
+  ORIENTATION_TILTED_TH   = 0.916
+
+Notes:
+  - OVERHEAD_TH unchanged (0.600); insufficient samples (overhead n=0, tilted n=612)
+  - TILTED_TH suggested = 0.916  (p90(TILTED)=0.897, p10(FRONTAL)=0.935)
+
+Apply by editing config/settings.py. Re-run a calibration session afterwards and verify that plot 02_ratio_per_mode.png shows the new cuts sitting in low-density valleys between modes.
