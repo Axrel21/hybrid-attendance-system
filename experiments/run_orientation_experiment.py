@@ -22,15 +22,24 @@ Usage — development laptop (webcam, display)
     # Suppress per-frame REC/DEBUG prints during a long capture
     python -m experiments.run_orientation_experiment tilted_close --quiet
 
-Usage — Raspberry Pi with Pi Camera Module 2
---------------------------------------------
-    CAMERA_BACKEND=picamera2 HEADLESS=1 \\
-    python -m experiments.run_orientation_experiment pi_frontal_2m \\
+Usage — Raspberry Pi with Pi Camera Module 2 (Conda Python)
+------------------------------------------------------------
+CAMERA_BACKEND=libcamera uses the auto-select backend (GStreamer or
+rpicam-vid subprocess).  Use this with Conda Python to avoid the
+libcamera Python ABI mismatch that breaks the picamera2 backend.
+
+    CAMERA_BACKEND=libcamera HEADLESS=1 \
+    python -m experiments.run_orientation_experiment pi_frontal_2m \
         --notes "Pi Camera, overhead mount, frontal, 2m" --quiet
 
-    CAMERA_BACKEND=picamera2 HEADLESS=1 \\
-    python -m experiments.run_orientation_experiment pi_overhead_3m \\
+    CAMERA_BACKEND=libcamera HEADLESS=1 \
+    python -m experiments.run_orientation_experiment pi_overhead_3m \
         --notes "Pi Camera, overhead mount, 45-deg tilt, 3m" --quiet
+
+Force the subprocess backend explicitly (always works, no GStreamer needed):
+
+    CAMERA_BACKEND=libcamera_subprocess HEADLESS=1 \
+    python -m experiments.run_orientation_experiment pi_overhead_3m --quiet
 
 Pi Camera K_FOCAL calibration (run this BEFORE the first Pi session)
 ----------------------------------------------------------------------

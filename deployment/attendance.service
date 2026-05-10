@@ -21,12 +21,16 @@ RestartSec=5
 # HEADLESS=1     — no display connected; skip all cv2.imshow calls.
 # VERBOSE_DEBUG=0 — silence per-frame console prints (journald captures
 #                  stdout; keeping it quiet reduces log volume).
-# CAMERA_BACKEND  — use picamera2 for the Pi Camera Module 2.
-# EXPERIMENT_LABEL — leave blank for production; set to a tag when
-#                  running a named calibration session.
+# CAMERA_BACKEND  — "libcamera" auto-selects between GStreamer and the
+#                  rpicam-vid subprocess backend.  Both work with Conda
+#                  Python 3.10 without any libcamera Python ABI issues.
+#                  Switch to "libcamera_subprocess" to force the
+#                  subprocess path if GStreamer is not installed.
+# EXPERIMENT_LABEL — leave blank for production; set to a session tag
+#                  when running a named calibration session.
 Environment=HEADLESS=1
 Environment=VERBOSE_DEBUG=0
-Environment=CAMERA_BACKEND=picamera2
+Environment=CAMERA_BACKEND=libcamera
 Environment=EXPERIMENT_LABEL=
 
 # Standard output and error both go to systemd's journal.

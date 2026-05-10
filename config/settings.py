@@ -111,8 +111,13 @@ VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "1") not in ("0", "false", "Fals
 HEADLESS = os.environ.get("HEADLESS", "0") not in ("0", "false", "False", "")
 
 # CAMERA_BACKEND — selects the frame-acquisition backend:
-#   "opencv"    — cv2.VideoCapture(0); works on laptop / USB webcam
-#   "picamera2" — Picamera2 via libcamera; required for Pi Camera Module 2
+#   "opencv"               — cv2.VideoCapture(0); laptop / USB webcam (default)
+#   "libcamera"            — auto-select GStreamer or subprocess; USE THIS on Pi
+#                            with Conda Python to avoid libcamera ABI mismatch
+#   "libcamera_gstreamer"  — GStreamer libcamerasrc (needs gst plugins-bad)
+#   "libcamera_subprocess" — rpicam-vid subprocess; always works on Pi OS
+#   "picamera2"            — Picamera2 (only works with matching Python ABI)
+#   "v4l2"                 — explicit V4L2 + MJPEG
 CAMERA_BACKEND = os.environ.get("CAMERA_BACKEND", "opencv")
 
 # =====================================================================

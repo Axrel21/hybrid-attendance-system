@@ -386,7 +386,8 @@ class FinalHybridEdge:
         signal.signal(signal.SIGINT,  _handle_signal)
 
         # ---- Camera (B2 fix: abstracted backend) ----
-        cap       = CameraSource(settings.CAMERA_BACKEND, width=640, height=480)
+        # fps is used by libcamera backends; OpenCV negotiates fps itself.
+        cap = CameraSource(settings.CAMERA_BACKEND, width=640, height=480, fps=15)
         prev_gray = None
 
         while not _shutdown[0]:
