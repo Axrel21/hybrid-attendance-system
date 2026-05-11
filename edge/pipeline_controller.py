@@ -1,5 +1,7 @@
 # edge/pipeline_controller.py
 from config import settings
+from config.logging_setup import LOG_DEBUG
+
 import numpy as np
 
 
@@ -95,9 +97,14 @@ class PipelineController:
         }
 
         if settings.VERBOSE_DEBUG:
-            print(
-                f"[REC] mode={mode} q|shape={tuple(mean_embedding.shape)}|q_norm={q_norm:.3f} -> "
-                f"{' '.join(per_user_summary) or '<empty_db>'} -> BEST={best_match}@{max_sim:.3f}"
+            LOG_DEBUG.debug(
+                "[REC] mode=%s q_shape=%s q_norm=%.3f -> %s -> BEST=%s@%.3f",
+                mode,
+                tuple(mean_embedding.shape),
+                q_norm,
+                " ".join(per_user_summary) or "<empty_db>",
+                best_match,
+                max_sim,
             )
 
         return best_match, max_sim

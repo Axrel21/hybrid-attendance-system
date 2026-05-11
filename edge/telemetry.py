@@ -16,6 +16,8 @@ from typing import Deque, List, Optional, Sequence
 
 import cv2
 
+from config.logging_setup import LOG_RUNTIME
+
 TELEMETRY_CSV_COLUMNS: List[str] = [
     "timestamp",
     "frame_idx",
@@ -60,7 +62,10 @@ def rotate_if_schema_changed(path: str, expected: Sequence[str]) -> bool:
     ts = time.strftime("%Y%m%d_%H%M%S")
     archived = path.replace(".csv", f".archived_{ts}.csv")
     os.rename(path, archived)
-    print(f"[TELEMETRY] schema changed -> archived {os.path.basename(archived)}")
+    LOG_RUNTIME.info(
+        "Telemetry CSV schema changed; archived %s",
+        os.path.basename(archived),
+    )
     return True
 
 

@@ -52,6 +52,8 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "DIAG_MAX_SIZE_MB",
     "FPS_WINDOW",
     "PERF_SAMPLE_INTERVAL",
+    "THERMAL_WARN_C",
+    "THERMAL_WARN_INTERVAL_S",
     "TELEMETRY",
     "TELEMETRY_OVERLAY",
     "TELEMETRY_LOG_EVERY_N",
@@ -64,9 +66,6 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "DEBUG_YUNET_SCORE_TH",
     "DEBUG_JPEG_QUALITY",
 )
-
-
-@dataclass(frozen=True)
 class ExperimentPaths:
     experiment_id: str
     root: str
@@ -81,7 +80,8 @@ class ExperimentPaths:
     diagnostic_csv: str
     attendance_csv: str
     settings_snapshot_path: str
-    run_log_path: str
+    runtime_log_path: str
+    debug_log_path: str
 
 
 def get_current_paths() -> Optional[ExperimentPaths]:
@@ -160,7 +160,8 @@ def init_experiment_session(project_root: str) -> ExperimentPaths:
     diagnostic_csv = os.path.join(diagnostics_dir, "diagnostic_log.csv")
     attendance_csv = os.path.join(diagnostics_dir, "attendance_log.csv")
     settings_snapshot_path = os.path.join(config_dir, "settings_snapshot.json")
-    run_log_path = os.path.join(logs_dir, f"run_{ts}.log")
+    runtime_log_path = os.path.join(logs_dir, "runtime.log")
+    debug_log_path = os.path.join(logs_dir, "debug.log")
 
     paths = ExperimentPaths(
         experiment_id=experiment_id,
@@ -176,7 +177,8 @@ def init_experiment_session(project_root: str) -> ExperimentPaths:
         diagnostic_csv=diagnostic_csv,
         attendance_csv=attendance_csv,
         settings_snapshot_path=settings_snapshot_path,
-        run_log_path=run_log_path,
+        runtime_log_path=runtime_log_path,
+        debug_log_path=debug_log_path,
     )
 
     _write_settings_snapshot(settings_snapshot_path, experiment_id)
@@ -185,5 +187,4 @@ def init_experiment_session(project_root: str) -> ExperimentPaths:
     os.environ["EXPERIMENT_ROOT"] = root
     os.environ["EXPERIMENT_ID"] = experiment_id
 
-    print(f"[EXPERIMENT] session={experiment_id}\n[EXPERIMENT] root={root}")
     return paths

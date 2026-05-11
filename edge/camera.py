@@ -72,12 +72,12 @@ import threading
 import time
 from typing import Optional
 
+import logging
+
 import cv2
 import numpy as np
 
-
-# =============================================================================
-# Utility: detect GStreamer support in this OpenCV build
+_LOG_CAM = logging.getLogger("attendance.runtime")
 # =============================================================================
 def _opencv_has_gstreamer() -> bool:
     """Return True if this OpenCV build was compiled with GStreamer support."""
@@ -544,13 +544,12 @@ def CameraSource(
         if _opencv_has_gstreamer():
             try:
                 cam = LibcameraGStreamerCamera(width=width, height=height, fps=fps)
-                print("[CAMERA] backend: libcamera_gstreamer (GStreamer libcamerasrc)")
+                _LOG_CAM.info("Camera backend: libcamera_gstreamer (GStreamer libcamerasrc)")
                 return cam
             except RuntimeError as exc:
-                print(f"[CAMERA] GStreamer init failed: {exc}")
-                print("[CAMERA] falling back to libcamera_subprocess")
+                _LOG_CAM.warning("GStreamer init failed: %s; falling back to libcamera_subprocess", exc)
         else:
-            print("[CAMERA] OpenCV built without GStreamer; using libcamera_subprocess")
+            _LOG_CAM.info("OpenCV built without GStreamer; using libcamera_subprocess")
         return RPiCamSubprocessCamera(width=width, height=height, fps=fps)
 
     if backend == "libcamera_gstreamer":

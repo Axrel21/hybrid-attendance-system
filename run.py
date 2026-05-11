@@ -15,8 +15,15 @@ Raspberry Pi (systemd service, see deployment/attendance.service):
     sudo systemctl start attendance
 
 Each launch creates an isolated session under experiments/exp_<timestamp>/ with
-telemetry, diagnostics, debug_frames, plots, logs, config (settings snapshot),
-and summaries. See config/experiment_session.py and os.environ["EXPERIMENT_ROOT"].
+telemetry, diagnostics, debug_frames, plots, logs (runtime.log, debug.log),
+config (settings snapshot), and summaries. See config/experiment_session.py
+and os.environ["EXPERIMENT_ROOT"].
+
+Logging
+-------
+* Console — warnings, errors, and key operational INFO only (no per-frame spam).
+* experiments/<exp>/logs/runtime.log — operational log.
+* experiments/<exp>/logs/debug.log — verbose / per-frame detail when VERBOSE_DEBUG=1.
 
 Environment flags
 -----------------
@@ -26,7 +33,8 @@ STREAM_PORT         MJPEG listen port (default 5000).
 TELEMETRY=0         Disable frame telemetry CSV + HUD strip (track timing remains in diagnostic_log).
 DEBUG_FRAMES=1      Optional event JPEG capture (rate-limited); GUI: press 's' for manual snapshot.
 CAMERA_BACKEND      "opencv" (default) or Pi backends (e.g. libcamera_subprocess).
-VERBOSE_DEBUG=0     Silence per-frame console prints.
+VERBOSE_DEBUG=1     Write per-frame pipeline/recognition detail to debug.log (console stays quiet).
+THERMAL_WARN_C=75   Log a throttled console warning when CPU temp (C) exceeds this (0 = off).
 EXPERIMENT_LABEL    Tag all diagnostic rows with a label for offline analysis.
 
 Log files (per session)
@@ -35,7 +43,8 @@ experiments/<exp_id>/diagnostics/attendance_log.csv
 experiments/<exp_id>/diagnostics/diagnostic_log.csv
 experiments/<exp_id>/telemetry/telemetry_log.csv
 experiments/<exp_id>/debug_frames/         Optional JPEG dumps (if DEBUG_FRAMES=1).
-experiments/<exp_id>/logs/run_<ts>.log     Run log for this process.
+experiments/<exp_id>/logs/runtime.log      Operational log.
+experiments/<exp_id>/logs/debug.log         Verbose log (VERBOSE_DEBUG=1).
 experiments/<exp_id>/config/settings_snapshot.json
 """
 from __future__ import annotations
@@ -51,27 +60,23 @@ sys.path.insert(0, PROJECT_ROOT)
 
 def main() -> int:
     from config.experiment_session import init_experiment_session
+    from config.logging_setup import configure_session_logging
 
     paths = init_experiment_session(PROJECT_ROOT)
+    from config import settings
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(paths.run_log_path),
-            logging.StreamHandler(sys.stdout),
-        ],
-        force=True,
-    )
-    log = logging.getLogger(__name__)
+    configure_session_logging(paths, settings.VERBOSE_DEBUG)
+    log = logging.getLogger("attendance.run")
 
     log.info("Attendance pipeline starting.")
     log.info("Experiment session: %s", paths.experiment_id)
     log.info("Experiment root: %s", paths.root)
-    log.info("Run log: %s", paths.run_log_path)
+    log.info("Runtime log: %s", paths.runtime_log_path)
+    log.info("Debug log: %s", paths.debug_log_path)
+    if settings.VERBOSE_DEBUG:
+        log.info("VERBOSE_DEBUG=1 — per-frame detail goes to debug.log (console remains minimal).")
 
     try:
-        from config import settings
         log.info(
             "Config: SIMULATE_PI=%s  HEADLESS=%s  STREAM_VIDEO=%s  TELEMETRY=%s  DEBUG_FRAMES=%s"
             "  CAMERA_BACKEND=%s  VERBOSE_DEBUG=%s  EXPERIMENT_LABEL=%r",

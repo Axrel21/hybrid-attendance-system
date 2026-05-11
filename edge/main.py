@@ -59,6 +59,7 @@ except ImportError:
     _PSUTIL_AVAILABLE = False
 
 from config import experiment_session, settings
+from config.logging_setup import LOG_DEBUG, LOG_RUNTIME, ensure_session_logging
 from edge import telemetry
 from edge.camera import CameraSource
 from edge.tracker import HybridTracker
@@ -229,7 +230,10 @@ def _rotate_diag_if_schema_changed(path, expected_columns):
     ts       = time.strftime("%Y%m%d_%H%M%S")
     archived = path.replace(".csv", f".archived_{ts}.csv")
     os.rename(path, archived)
-    print(f"[DIAG] schema changed -> archived previous log to {os.path.basename(archived)}")
+    LOG_RUNTIME.info(
+        "Diagnostic schema changed; archived previous log to %s",
+        os.path.basename(archived),
+    )
     return True
 
 
@@ -238,6 +242,8 @@ def _rotate_diag_if_schema_changed(path, expected_columns):
 # =================================================================
 class FinalHybridEdge:
     def __init__(self):
+        ensure_session_logging(settings.VERBOSE_DEBUG)
+
         # ---- Thread configuration ----
         if settings.SIMULATE_PI:
             cv2.setNumThreads(settings.PI_MAX_THREADS)
@@ -295,10 +301,14 @@ class FinalHybridEdge:
             self.diag_writer.writerow(DIAG_COLUMNS)
 
         if settings.EXPERIMENT_LABEL:
-            print(f"[EXPERIMENT] tagging session as '{settings.EXPERIMENT_LABEL}'")
+            LOG_RUNTIME.info(
+                "Tagging session EXPERIMENT_LABEL=%r",
+                settings.EXPERIMENT_LABEL,
+            )
 
         # ---- Performance instrumentation state ----
         self._frame_count  = 0
+        self._last_thermal_warn = 0.0
         self._fps_times    = deque(maxlen=settings.FPS_WINDOW)
         self._cpu_pct      = 0.0
         self._mem_mb       = 0.0
@@ -354,9 +364,10 @@ class FinalHybridEdge:
                 port=settings.STREAM_PORT,
                 daemon=True,
             )
-            print(
-                f"[STREAM] MJPEG http://{settings.STREAM_HOST}:{settings.STREAM_PORT}/video_feed "
-                f"(browser: http://<this-host>:{settings.STREAM_PORT}/ )"
+            LOG_RUNTIME.info(
+                "MJPEG stream http://%s:%s/video_feed",
+                settings.STREAM_HOST,
+                settings.STREAM_PORT,
             )
 
         # ---- Display window — create once (P5 fix) ----
@@ -500,9 +511,13 @@ class FinalHybridEdge:
             kept_count = 0 if faces is None else len(faces)
 
             if settings.VERBOSE_DEBUG:
-                print(
-                    f"[DEBUG] Frame:{w}x{h}  faces:{kept_count}"
-                    f" (raw {raw_count})  det:{t_detect_ms:.1f}ms"
+                LOG_DEBUG.debug(
+                    "Frame %dx%d faces:%d (raw %d) det:%.1fms",
+                    w,
+                    h,
+                    kept_count,
+                    raw_count,
+                    t_detect_ms,
                 )
 
             # ---- Face validation ----
@@ -537,6 +552,18 @@ class FinalHybridEdge:
                 self._cpu_pct    = _psutil.cpu_percent(interval=None)
                 self._mem_mb     = self._psutil_proc.memory_info().rss / 1e6
                 self._cpu_temp_c = _read_cpu_temp()
+                if (
+                    settings.THERMAL_WARN_C > 0
+                    and self._cpu_temp_c >= settings.THERMAL_WARN_C
+                    and (time.time() - self._last_thermal_warn)
+                    >= settings.THERMAL_WARN_INTERVAL_S
+                ):
+                    LOG_RUNTIME.warning(
+                        "CPU temperature %.1f C >= threshold %.1f C",
+                        self._cpu_temp_c,
+                        settings.THERMAL_WARN_C,
+                    )
+                    self._last_thermal_warn = time.time()
 
             # ---- Per-track pipeline ----
             t_tracks_start = time.perf_counter()
@@ -683,11 +710,11 @@ class FinalHybridEdge:
                         dbg["decision"] = "MATCHED"
                         if time.time() - self.cooldowns.get(identity, 0) > 300:
                             self.cooldowns[identity] = time.time()
-                            print(f"ATTENDANCE MARKED: {identity}")
+                            LOG_RUNTIME.info("Attendance marked: %s", identity)
                     elif sim >= th_mid:
                         dbg["decision"] = "OFFLOAD_TO_CLOUD"
                         if settings.VERBOSE_DEBUG:
-                            print("OFFLOADING TO ARCFACE SERVER...")
+                            LOG_DEBUG.debug("Offloading to ArcFace server (sim in mid band)")
                     else:
                         dbg["decision"] = "BELOW_THRESHOLD"
 
@@ -815,6 +842,7 @@ class FinalHybridEdge:
                     self._telemetry_file.flush()
 
         # ---- Cleanup ----
+        LOG_RUNTIME.info("Pipeline shutdown (closing camera and log files).")
         cap.release()
         if not settings.HEADLESS:
             cv2.destroyAllWindows()
@@ -829,5 +857,11 @@ class FinalHybridEdge:
 
 if __name__ == "__main__":
     experiment_session.init_experiment_session(_PROJECT_ROOT)
+    from config import settings
+    from config.logging_setup import configure_session_logging
+
+    _p = experiment_session.get_current_paths()
+    if _p is not None:
+        configure_session_logging(_p, settings.VERBOSE_DEBUG)
     node = FinalHybridEdge()
     node.run()

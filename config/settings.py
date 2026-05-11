@@ -120,10 +120,10 @@ EXPERIMENT_LABEL = os.environ.get("EXPERIMENT_LABEL", "")
 # Per-frame [REC]/[DEBUG] prints are useful when iterating but pollute
 # logs during multi-minute calibration sessions. Toggle via env var so
 # experimental runs stay quiet without code edits:
-#     $env:VERBOSE_DEBUG=0   (PowerShell)  - silence per-frame prints
-#     $env:VERBOSE_DEBUG=1                  - keep them (default)
+#     $env:VERBOSE_DEBUG=0   (default) — per-frame detail only to experiments/.../logs/debug.log
+#     $env:VERBOSE_DEBUG=1                  — enable debug.log volume (still quiet console)
 # Structured CSV logging is unaffected either way.
-VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "1") not in ("0", "false", "False", "")
+VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "0") not in ("0", "false", "False", "")
 
 # =====================================================================
 # Raspberry Pi deployment flags
@@ -179,6 +179,10 @@ FPS_WINDOW = 30
 # every N frames (psutil calls have non-trivial overhead; don't call
 # every frame).
 PERF_SAMPLE_INTERVAL = 10
+
+# CPU temperature warning (throttled). 0 = disabled. Example: THERMAL_WARN_C=75
+THERMAL_WARN_C = float(os.environ.get("THERMAL_WARN_C", "0"))
+THERMAL_WARN_INTERVAL_S = float(os.environ.get("THERMAL_WARN_INTERVAL_S", "60"))
 
 # =====================================================================
 # Research telemetry (frame-level CSV + optional corner overlay)
