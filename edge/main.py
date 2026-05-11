@@ -862,12 +862,15 @@ class FinalHybridEdge:
             except Exception as exc:
                 LOG_RUNTIME.warning("Experiment report generation failed: %s", exc)
 
+if __name__ == "__main__":
     experiment_session.init_experiment_session(_PROJECT_ROOT)
+
     from config import settings
     from config.logging_setup import configure_session_logging
 
     _p = experiment_session.get_current_paths()
     if _p is not None:
         configure_session_logging(_p, settings.VERBOSE_DEBUG)
+
     node = FinalHybridEdge()
     node.run()
