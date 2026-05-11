@@ -59,6 +59,7 @@ except ImportError:
     _PSUTIL_AVAILABLE = False
 
 from config import settings
+from edge import telemetry
 from edge.camera import CameraSource
 from edge.tracker import HybridTracker
 from edge.liveness import LivenessEngine
@@ -78,6 +79,7 @@ model_path2 = os.path.join(_PROJECT_ROOT, "models", "mobilefacenet.tflite")
 data_path   = os.path.join(_PROJECT_ROOT, "data",   "known_faces.json")
 log_path    = os.path.join(_PROJECT_ROOT, "data",   "attendance_log.csv")
 diag_path   = os.path.join(_PROJECT_ROOT, "data",   "diagnostic_log.csv")
+telemetry_path = os.path.join(_PROJECT_ROOT, "data", "telemetry_log.csv")
 
 
 # =================================================================
@@ -297,6 +299,37 @@ class FinalHybridEdge:
         # Overlays on frame: native window and/or MJPEG viewers need annotations.
         self._show_overlay = (not settings.HEADLESS) or settings.STREAM_VIDEO
 
+        # ---- Frame telemetry (CSV + optional HUD strip) ----
+        self._telemetry_state = None
+        self._telemetry_file = None
+        self._telemetry_writer = None
+        self._telemetry_show_strip = False
+        if settings.TELEMETRY:
+            self._telemetry_state = telemetry.TelemetryFrameState(settings.TELEMETRY_DT_WINDOW)
+            _tel_hdr = telemetry.rotate_if_schema_changed(
+                telemetry_path, telemetry.TELEMETRY_CSV_COLUMNS
+            )
+            self._telemetry_file = open(
+                telemetry_path, "a", newline="", buffering=settings.LOG_BUFFER_SIZE
+            )
+            self._telemetry_writer = csv.writer(self._telemetry_file)
+            if _tel_hdr:
+                self._telemetry_writer.writerow(telemetry.TELEMETRY_CSV_COLUMNS)
+            self._telemetry_show_strip = settings.TELEMETRY_OVERLAY and self._show_overlay
+
+        # ---- Debug JPEG capture (event-triggered) ----
+        self._debug_writer = None
+        if settings.DEBUG_FRAMES:
+            _dbg_root = settings.DEBUG_FRAMES_DIR or os.path.join(
+                _PROJECT_ROOT, "debug_frames"
+            )
+            self._debug_writer = telemetry.DebugFrameWriter(
+                _dbg_root,
+                settings.DEBUG_FRAMES_MIN_INTERVAL_S,
+                settings.DEBUG_FRAMES_MAX_PER_RUN,
+                settings.DEBUG_JPEG_QUALITY,
+            )
+
         # Optional MJPEG (secondary to cv2.imshow; off by default).
         self._stream_set_frame = None
         if settings.STREAM_VIDEO:
@@ -432,7 +465,15 @@ class FinalHybridEdge:
 
         while not _shutdown[0]:
             loop_start = time.time()
+            loop_start_pc = time.perf_counter()
+            frame_idx = 0
+            dt_ms = mean_dt = std_dt = 0.0
+            if self._telemetry_state is not None:
+                frame_idx, dt_ms, mean_dt, std_dt = self._telemetry_state.tick_dt(loop_start_pc)
+
+            t0 = time.perf_counter()
             ret, frame = cap.read()
+            t_capture_ms = (time.perf_counter() - t0) * 1000.0
             if not ret:
                 break
 
@@ -470,6 +511,10 @@ class FinalHybridEdge:
 
             objects = self.tracker.update(rects)
 
+            # Automatic debug JPEGs only when something actionable is on-frame:
+            # pipeline-validated face(s) and/or tracker output (manual 's' unaffected).
+            _debug_auto_save_ok = len(valid_faces) > 0 or len(objects) > 0
+
             # ---- Rolling FPS ----
             self._fps_times.append(loop_start)
             fps_rolling = (
@@ -485,6 +530,10 @@ class FinalHybridEdge:
                 self._cpu_temp_c = _read_cpu_temp()
 
             # ---- Per-track pipeline ----
+            t_tracks_start = time.perf_counter()
+            max_tl = max_te = max_tm = 0.0
+            max_live = max_sim = 0.0
+            overlay_draw_ms = 0.0
             for track_id, (centroid, box) in objects.items():
                 x, y, fw, fh = box
 
@@ -513,6 +562,7 @@ class FinalHybridEdge:
                     "cpu_pct":       self._cpu_pct,
                     "mem_mb":        self._mem_mb,
                     "cpu_temp_c":    self._cpu_temp_c,
+                    "_yunet_score":  None,
                 }
 
                 try:
@@ -532,6 +582,8 @@ class FinalHybridEdge:
                         (int(matched_face[4 + 2*j]), int(matched_face[4 + 2*j + 1]))
                         for j in range(5)
                     ]
+                    if matched_face.shape[0] >= 15:
+                        dbg["_yunet_score"] = float(matched_face[-1])
 
                     mode         = self.pose_est.estimate_mode(track_id, landmarks)
                     dbg["mode"]  = mode
@@ -641,37 +693,117 @@ class FinalHybridEdge:
                     ])
 
                 finally:
+                    max_tl = max(max_tl, float(dbg["t_liveness_ms"]))
+                    max_te = max(max_te, float(dbg["t_embed_ms"]))
+                    max_tm = max(max_tm, float(dbg["t_match_ms"]))
+                    max_live = max(max_live, float(dbg["live_conf"]))
+                    max_sim = max(max_sim, float(dbg["sim"]))
                     if self._show_overlay:
+                        _ov0 = time.perf_counter()
                         self._draw_overlay(frame, x, y, fw, fh, track_id, dbg)
+                        overlay_draw_ms += (time.perf_counter() - _ov0) * 1000.0
+                    if self._debug_writer is not None and _debug_auto_save_ok:
+                        _ys = dbg.get("_yunet_score")
+                        for _subdir, _tag, _extra in telemetry.classify_debug_events(
+                            track_id,
+                            dbg["decision"],
+                            dbg["lbl"],
+                            _ys,
+                            settings.DEBUG_YUNET_SCORE_TH,
+                        ):
+                            self._debug_writer.save(frame, _subdir, _tag, _extra)
                     self._write_diag(loop_start, w, h, track_id, dbg)
+
+            t_tracks_ms = (time.perf_counter() - t_tracks_start) * 1000.0
 
             prev_gray = curr_gray.copy()
 
+            tel_strip_ms = 0.0
+            if self._telemetry_show_strip:
+                ts0 = time.perf_counter()
+                lines = [
+                    f"FPS:{fps_rolling:.1f}  dt:{mean_dt:.0f}+/-{std_dt:.0f}ms",
+                    f"CAP:{t_capture_ms:.0f} DET:{t_detect_ms:.0f} TRK:{t_tracks_ms:.0f}ms",
+                    f"LIVE:{max_tl:.0f} EMB:{max_te:.0f} MATCH:{max_tm:.0f}ms",
+                    f"OVR:{overlay_draw_ms:.0f}ms  CPU:{self._cpu_pct:.0f}% TEMP:{self._cpu_temp_c:.0f}C",
+                    f"RAM:{self._mem_mb:.0f}MB  TRK:{len(objects)} FACE:{len(valid_faces)}",
+                    f"SIMmax:{max_sim:.2f}  LIVEmax:{max_live:.2f}",
+                ]
+                telemetry.draw_telemetry_lines(frame, lines)
+                tel_strip_ms = (time.perf_counter() - ts0) * 1000.0
+            t_overlay_ms = overlay_draw_ms + tel_strip_ms
+
+            if (
+                self._debug_writer is not None
+                and settings.DEBUG_SAMPLE_EVERY_N > 0
+                and _debug_auto_save_ok
+            ):
+                if self._frame_count % settings.DEBUG_SAMPLE_EVERY_N == 0:
+                    self._debug_writer.save(frame, "sampled", "every_n", str(self._frame_count))
+
+            t_post_start = time.perf_counter()
             if self._stream_set_frame is not None:
                 jq = settings.STREAM_JPEG_QUALITY
                 self._stream_set_frame(frame, jq)
 
-            # ---- Display (B3: skipped in headless mode) ----
             if not settings.HEADLESS:
                 cv2.imshow("Hybrid Edge Pipeline", frame)
                 elapsed_ms = (time.time() - loop_start) * 1000.0
                 if settings.SIMULATE_PI:
-                    sleep_ms   = max(1, int(settings.TARGET_LATENCY_MS - elapsed_ms))
-                    if cv2.waitKey(sleep_ms) & 0xFF == ord("q"):
-                        break
+                    sleep_ms = max(1, int(settings.TARGET_LATENCY_MS - elapsed_ms))
+                    key = cv2.waitKey(sleep_ms) & 0xFF
                 else:
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        break
+                    key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                if key == ord("s") and self._debug_writer is not None:
+                    self._debug_writer.save(frame, "manual", "key_s", str(self._frame_count))
             else:
                 # Headless: use time.sleep to respect the target latency budget.
                 remaining = settings.TARGET_LATENCY_MS / 1000.0 - (time.time() - loop_start)
                 if remaining > 0:
                     time.sleep(remaining)
 
+            t_post_ms = (time.perf_counter() - t_post_start) * 1000.0
+            t_total_ms = (time.perf_counter() - loop_start_pc) * 1000.0
+
+            if (
+                self._telemetry_writer is not None
+                and self._frame_count % settings.TELEMETRY_LOG_EVERY_N == 0
+            ):
+                self._telemetry_writer.writerow([
+                    round(time.time(), 3),
+                    frame_idx,
+                    settings.EXPERIMENT_LABEL,
+                    round(fps_rolling, 2),
+                    round(dt_ms, 2),
+                    round(std_dt, 2),
+                    round(t_capture_ms, 2),
+                    round(t_detect_ms, 2),
+                    round(t_tracks_ms, 2),
+                    round(max_tl, 2),
+                    round(max_te, 2),
+                    round(max_tm, 2),
+                    round(t_overlay_ms, 2),
+                    round(t_post_ms, 2),
+                    round(t_total_ms, 2),
+                    round(self._cpu_pct, 1),
+                    round(self._mem_mb, 1),
+                    round(self._cpu_temp_c, 1),
+                    len(objects),
+                    len(valid_faces),
+                    raw_count,
+                    kept_count,
+                    round(max_live, 3),
+                    round(max_sim, 3),
+                ])
+
             # ---- P6 fix: periodic CSV flush (SD-card I/O coalescing) ----
             if self._frame_count % settings.LOG_FLUSH_INTERVAL == 0:
                 self.log_file.flush()
                 self.diag_file.flush()
+                if self._telemetry_file is not None:
+                    self._telemetry_file.flush()
 
         # ---- Cleanup ----
         cap.release()
@@ -681,6 +813,9 @@ class FinalHybridEdge:
         self.log_file.close()
         self.diag_file.flush()
         self.diag_file.close()
+        if self._telemetry_file is not None:
+            self._telemetry_file.flush()
+            self._telemetry_file.close()
 
 
 if __name__ == "__main__":

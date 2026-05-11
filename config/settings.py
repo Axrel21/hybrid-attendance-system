@@ -179,3 +179,29 @@ FPS_WINDOW = 30
 # every N frames (psutil calls have non-trivial overhead; don't call
 # every frame).
 PERF_SAMPLE_INTERVAL = 10
+
+# =====================================================================
+# Research telemetry (frame-level CSV + optional corner overlay)
+# =====================================================================
+# TELEMETRY=0 disables frame telemetry CSV and the telemetry strip overlay.
+# TELEMETRY_LOG_EVERY_N>1 subsamples rows (reduces SD-card writes).
+# TELEMETRY_DT_WINDOW — rolling window size for mean/std of frame intervals (ms).
+TELEMETRY = _env_truthy("TELEMETRY", "1")
+TELEMETRY_OVERLAY = _env_truthy("TELEMETRY_OVERLAY", "1")
+TELEMETRY_LOG_EVERY_N = max(1, int(os.environ.get("TELEMETRY_LOG_EVERY_N", "1")))
+TELEMETRY_DT_WINDOW = max(2, int(os.environ.get("TELEMETRY_DT_WINDOW", "30")))
+
+# =====================================================================
+# Debug frame capture (optional JPEG dumps; rate-limited)
+# =====================================================================
+# DEBUG_FRAMES=1 enables event-triggered saves under debug_frames/ (or DEBUG_FRAMES_DIR).
+# DEBUG_FRAMES_MIN_INTERVAL_S — minimum wall time between any two saves.
+# DEBUG_SAMPLE_EVERY_N — if >0, also save one frame every N frames under sampled/.
+# DEBUG_YUNET_SCORE_TH — if >0, save when matched face YuNet score is below this.
+DEBUG_FRAMES = _env_truthy("DEBUG_FRAMES", "0")
+DEBUG_FRAMES_DIR = os.environ.get("DEBUG_FRAMES_DIR", "")
+DEBUG_FRAMES_MIN_INTERVAL_S = float(os.environ.get("DEBUG_FRAMES_MIN_INTERVAL_S", "2.0"))
+DEBUG_FRAMES_MAX_PER_RUN = max(1, int(os.environ.get("DEBUG_FRAMES_MAX_PER_RUN", "500")))
+DEBUG_SAMPLE_EVERY_N = int(os.environ.get("DEBUG_SAMPLE_EVERY_N", "0"))
+DEBUG_YUNET_SCORE_TH = float(os.environ.get("DEBUG_YUNET_SCORE_TH", "0"))
+DEBUG_JPEG_QUALITY = int(os.environ.get("DEBUG_JPEG_QUALITY", "88"))
