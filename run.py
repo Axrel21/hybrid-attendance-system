@@ -36,9 +36,12 @@ CAMERA_BACKEND      "opencv" (default) or Pi backends (e.g. libcamera_subprocess
 VERBOSE_DEBUG=1     Write per-frame pipeline/recognition detail to debug.log (console stays quiet).
 THERMAL_WARN_C=75   Log a throttled console warning when CPU temp (C) exceeds this (0 = off).
 EXPERIMENT_LABEL    Tag all diagnostic rows with a label for offline analysis.
+AUTO_EXPERIMENT_REPORT=0   Skip post-run PNG/JSON/MD report (saves SD/CPU if pandas+matplotlib installed).
 
 Log files (per session)
 -----------------------
+experiments/<exp_id>/plots/report_*          Auto-generated analysis PNGs (if AUTO_EXPERIMENT_REPORT).
+experiments/<exp_id>/summaries/report_*.json Summaries and report_*.md.
 experiments/<exp_id>/diagnostics/attendance_log.csv
 experiments/<exp_id>/diagnostics/diagnostic_log.csv
 experiments/<exp_id>/telemetry/telemetry_log.csv

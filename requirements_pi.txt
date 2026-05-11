@@ -35,5 +35,6 @@ scipy==1.10.1
 # used instead; Picamera2 is still imported lazily so it must be present.
 picamera2>=0.3.12
 
-# --- Performance instrumentation ---
-psutil>=5.9.0
+# --- Post-run analysis (optional, needs pandas + matplotlib) ---
+pandas>=2.0.0
+matplotlib>=3.7.0

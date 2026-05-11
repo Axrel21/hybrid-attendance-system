@@ -854,8 +854,14 @@ class FinalHybridEdge:
             self._telemetry_file.flush()
             self._telemetry_file.close()
 
+        if settings.AUTO_EXPERIMENT_REPORT:
+            try:
+                from edge.experiment_report import generate_experiment_report
 
-if __name__ == "__main__":
+                generate_experiment_report(paths=self._experiment_paths)
+            except Exception as exc:
+                LOG_RUNTIME.warning("Experiment report generation failed: %s", exc)
+
     experiment_session.init_experiment_session(_PROJECT_ROOT)
     from config import settings
     from config.logging_setup import configure_session_logging

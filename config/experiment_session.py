@@ -65,6 +65,7 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "DEBUG_SAMPLE_EVERY_N",
     "DEBUG_YUNET_SCORE_TH",
     "DEBUG_JPEG_QUALITY",
+    "AUTO_EXPERIMENT_REPORT",
 )
 class ExperimentPaths:
     experiment_id: str

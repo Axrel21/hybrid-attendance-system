@@ -209,3 +209,6 @@ DEBUG_FRAMES_MAX_PER_RUN = max(1, int(os.environ.get("DEBUG_FRAMES_MAX_PER_RUN",
 DEBUG_SAMPLE_EVERY_N = int(os.environ.get("DEBUG_SAMPLE_EVERY_N", "0"))
 DEBUG_YUNET_SCORE_TH = float(os.environ.get("DEBUG_YUNET_SCORE_TH", "0"))
 DEBUG_JPEG_QUALITY = int(os.environ.get("DEBUG_JPEG_QUALITY", "88"))
+
+# Post-run plots + summaries (edge.experiment_report). OFF=0 skips to save Pi time/SD.
+AUTO_EXPERIMENT_REPORT = _env_truthy("AUTO_EXPERIMENT_REPORT", "1")
