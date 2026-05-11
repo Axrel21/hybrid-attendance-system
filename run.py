@@ -14,6 +14,10 @@ Raspberry Pi (manual):
 Raspberry Pi (systemd service, see deployment/attendance.service):
     sudo systemctl start attendance
 
+Each launch creates an isolated session under experiments/exp_<timestamp>/ with
+telemetry, diagnostics, debug_frames, plots, logs, config (settings snapshot),
+and summaries. See config/experiment_session.py and os.environ["EXPERIMENT_ROOT"].
+
 Environment flags
 -----------------
 HEADLESS=1          Skip all cv2.imshow / display calls (SSH / service mode).
@@ -25,13 +29,14 @@ CAMERA_BACKEND      "opencv" (default) or Pi backends (e.g. libcamera_subprocess
 VERBOSE_DEBUG=0     Silence per-frame console prints.
 EXPERIMENT_LABEL    Tag all diagnostic rows with a label for offline analysis.
 
-Log files
----------
-data/attendance_log.csv     Matched attendance events only.
-data/diagnostic_log.csv     Per-frame per-track diagnostic data.
-data/telemetry_log.csv      Per-frame pipeline timing / FPS / thermal (if TELEMETRY=1).
-debug_frames/               Optional JPEG dumps (if DEBUG_FRAMES=1).
-logs/run_<timestamp>.log    Runtime exception and startup log.
+Log files (per session)
+-----------------------
+experiments/<exp_id>/diagnostics/attendance_log.csv
+experiments/<exp_id>/diagnostics/diagnostic_log.csv
+experiments/<exp_id>/telemetry/telemetry_log.csv
+experiments/<exp_id>/debug_frames/         Optional JPEG dumps (if DEBUG_FRAMES=1).
+experiments/<exp_id>/logs/run_<ts>.log     Run log for this process.
+experiments/<exp_id>/config/settings_snapshot.json
 """
 from __future__ import annotations
 
@@ -40,36 +45,31 @@ import os
 import sys
 import time
 
-# ------------------------------------------------------------------
-# Logging — both file (logs/) and stdout so systemd journald captures it
-# ------------------------------------------------------------------
-_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-os.makedirs(_LOG_DIR, exist_ok=True)
-
-_log_file = os.path.join(_LOG_DIR, f"run_{time.strftime('%Y%m%d_%H%M%S')}.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(_log_file),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-log = logging.getLogger(__name__)
-
-# ------------------------------------------------------------------
-# Ensure the project root is on sys.path regardless of CWD
-# ------------------------------------------------------------------
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
 
 
 def main() -> int:
-    log.info("Attendance pipeline starting.")
-    log.info("Log file: %s", _log_file)
+    from config.experiment_session import init_experiment_session
 
-    # Surface the active configuration so the log captures the exact
-    # settings used in this run — useful for correlating performance
-    # data with config changes.
+    paths = init_experiment_session(PROJECT_ROOT)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(paths.run_log_path),
+            logging.StreamHandler(sys.stdout),
+        ],
+        force=True,
+    )
+    log = logging.getLogger(__name__)
+
+    log.info("Attendance pipeline starting.")
+    log.info("Experiment session: %s", paths.experiment_id)
+    log.info("Experiment root: %s", paths.root)
+    log.info("Run log: %s", paths.run_log_path)
+
     try:
         from config import settings
         log.info(

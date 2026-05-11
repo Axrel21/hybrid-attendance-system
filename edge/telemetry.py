@@ -132,7 +132,9 @@ class TelemetryFrameState:
 
 class DebugFrameWriter:
     """
-    Event-triggered JPEG saves under _PROJECT_ROOT/debug_frames/...
+    Event-triggered JPEG saves under the experiment session debug_frames/
+    directory (or DEBUG_FRAMES_DIR when set as an escape hatch).
+
     Rate-limited and capped per process.
     """
 

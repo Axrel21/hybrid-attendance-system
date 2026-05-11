@@ -58,7 +58,7 @@ except ImportError:
     _psutil = None
     _PSUTIL_AVAILABLE = False
 
-from config import settings
+from config import experiment_session, settings
 from edge import telemetry
 from edge.camera import CameraSource
 from edge.tracker import HybridTracker
@@ -77,9 +77,14 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 model_path1 = os.path.join(_PROJECT_ROOT, "models", "yunet.onnx")
 model_path2 = os.path.join(_PROJECT_ROOT, "models", "mobilefacenet.tflite")
 data_path   = os.path.join(_PROJECT_ROOT, "data",   "known_faces.json")
-log_path    = os.path.join(_PROJECT_ROOT, "data",   "attendance_log.csv")
-diag_path   = os.path.join(_PROJECT_ROOT, "data",   "diagnostic_log.csv")
-telemetry_path = os.path.join(_PROJECT_ROOT, "data", "telemetry_log.csv")
+
+
+def _artifact_paths():
+    """Resolve CSV/debug paths for the active experiment session (or create one)."""
+    p = experiment_session.get_current_paths()
+    if p is None:
+        p = experiment_session.init_experiment_session(_PROJECT_ROOT)
+    return p
 
 
 # =================================================================
@@ -179,8 +184,8 @@ def find_best_face_match(tracker_box, detected_faces, iou_threshold=0.3):
 # columns (t_detect_ms … cpu_temp_c) are added in this Pi deployment phase.
 #
 # On first run after upgrading from an older schema the existing
-# diagnostic_log.csv is auto-rotated to diagnostic_log.archived_<ts>.csv
-# so schemas never mix silently.
+# diagnostic_log.csv in this session directory is auto-rotated to
+# diagnostic_log.archived_<ts>.csv so schemas never mix silently.
 DIAG_COLUMNS = [
     # --- legacy block (DO NOT reorder — downstream consumers depend on it) ---
     "timestamp",  "frame_w",    "frame_h",    "track_id",
@@ -265,7 +270,11 @@ class FinalHybridEdge:
         self.embedding_buffers: dict = {}
         self.cooldowns: dict = {}
 
+        paths = _artifact_paths()
+        self._experiment_paths = paths
+
         # ---- Attendance log (matched events only; lean on SD card) ----
+        log_path = paths.attendance_csv
         log_exists = os.path.isfile(log_path) and os.path.getsize(log_path) > 0
         # P6 fix: open with 8 KB write buffer to reduce SD-card I/O pressure.
         self.log_file   = open(log_path, "a", newline="", buffering=settings.LOG_BUFFER_SIZE)
@@ -278,6 +287,7 @@ class FinalHybridEdge:
             ])
 
         # ---- Per-frame diagnostic log ----
+        diag_path = paths.diagnostic_csv
         write_header   = _rotate_diag_if_schema_changed(diag_path, DIAG_COLUMNS)
         self.diag_file   = open(diag_path, "a", newline="", buffering=settings.LOG_BUFFER_SIZE)
         self.diag_writer = csv.writer(self.diag_file)
@@ -306,6 +316,7 @@ class FinalHybridEdge:
         self._telemetry_show_strip = False
         if settings.TELEMETRY:
             self._telemetry_state = telemetry.TelemetryFrameState(settings.TELEMETRY_DT_WINDOW)
+            telemetry_path = paths.telemetry_csv
             _tel_hdr = telemetry.rotate_if_schema_changed(
                 telemetry_path, telemetry.TELEMETRY_CSV_COLUMNS
             )
@@ -320,9 +331,7 @@ class FinalHybridEdge:
         # ---- Debug JPEG capture (event-triggered) ----
         self._debug_writer = None
         if settings.DEBUG_FRAMES:
-            _dbg_root = settings.DEBUG_FRAMES_DIR or os.path.join(
-                _PROJECT_ROOT, "debug_frames"
-            )
+            _dbg_root = settings.DEBUG_FRAMES_DIR or paths.debug_frames_dir
             self._debug_writer = telemetry.DebugFrameWriter(
                 _dbg_root,
                 settings.DEBUG_FRAMES_MIN_INTERVAL_S,
@@ -819,5 +828,6 @@ class FinalHybridEdge:
 
 
 if __name__ == "__main__":
+    experiment_session.init_experiment_session(_PROJECT_ROOT)
     node = FinalHybridEdge()
     node.run()
