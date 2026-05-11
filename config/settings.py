@@ -1,18 +1,42 @@
 # config/settings.py
 import os
 
+
+def _env_truthy(name: str, default: str = "0") -> bool:
+    """True unless value is unset/empty or one of 0/false/False."""
+    return os.environ.get(name, default) not in ("0", "false", "False", "")
+
+# ---------------------------------------------------------------------
+# Simulation vs deployment
+# ---------------------------------------------------------------------
+# SIMULATE_PI=1 — laptop / lab only: single-thread (or PI_MAX_THREADS) caps for
+# OpenCV, OMP, OpenBLAS, TensorFlow (if present), and TFLite interpreter
+# (see edge.main), plus default TARGET_LATENCY_MS for paced runs.
+#
+# Default SIMULATE_PI=0 — real Raspberry Pi and normal dev: no artificial
+# thread caps at import time; libraries use their defaults.
+#
+#   Laptop Pi-like benchmarking:  SIMULATE_PI=1
+#   Raspberry Pi production:       (omit or SIMULATE_PI=0)
+SIMULATE_PI = _env_truthy("SIMULATE_PI", "0")
+
+# Used only when SIMULATE_PI=1 (edge.main gates interpreter / cv2.apply).
+PI_MAX_THREADS = max(1, int(os.environ.get("PI_MAX_THREADS", "1")))
+
+# Frame pacing budget (ms). When SIMULATE_PI=1 defaults to 65 (CLI can override).
+# When SIMULATE_PI=0 defaults to 0 so the headless loop does not sleep to pad
+# every frame; GUI mode uses waitKey(1) unless simulating.
+_default_target_ms = "65" if SIMULATE_PI else "0"
+TARGET_LATENCY_MS = max(0, int(os.environ.get("TARGET_LATENCY_MS", _default_target_ms)))
+
 try:
     import cv2
-    cv2.setNumThreads(1)
+
+    if SIMULATE_PI:
+        cv2.setNumThreads(PI_MAX_THREADS)
 except ImportError:
     pass
 
-# FIX-8: Removed unconditional import and setting of tensorflow threads to prevent bottlenecking non-Pi environments.
-
-# System Modes & Simulation
-SIMULATE_PI = True       
-PI_MAX_THREADS = 1       # Restrict OpenCV/TFLite to 1 core for true simulation
-TARGET_LATENCY_MS = 65   # Target edge delay (for simulation sync)
 CAMERA_MODE = "tilted"   # "tilted" (overhead) or "flat" (frontal)
 
 # Base Matching Thresholds (Adaptive logic will modify these)
@@ -42,21 +66,21 @@ MIN_SKIN_RATIO = 0.15          # Reject screens/masks with low skin
 MAX_BRIGHTNESS_TH = 180
 # NOTE: duplicate SCREEN_LAPLACIAN_TH = 80 removed (was silently overwriting the 80.0 above)
 
-# Set Environment Variables for Simulation
+# Single-thread / low-thread simulation: only when SIMULATE_PI=1.
 if SIMULATE_PI:
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
-    os.environ["TF_NUM_INTEROP_THREADS"] = "1"
-    cv2.setNumThreads(1)
-    # TF optimizations safely nested under SIMULATE_PI condition
+    _t = str(PI_MAX_THREADS)
+    os.environ["OMP_NUM_THREADS"] = _t
+    os.environ["OPENBLAS_NUM_THREADS"] = _t
+    os.environ["TF_NUM_INTRAOP_THREADS"] = _t
+    os.environ["TF_NUM_INTEROP_THREADS"] = _t
     try:
         import tensorflow as tf
-        tf.config.threading.set_inter_op_parallelism_threads(1)
-        tf.config.threading.set_intra_op_parallelism_threads(1) 
+
+        tf.config.threading.set_inter_op_parallelism_threads(PI_MAX_THREADS)
+        tf.config.threading.set_intra_op_parallelism_threads(PI_MAX_THREADS)
     except Exception:
         pass
-    
+
 # Liveness Motion Tuning
 MOTION_MIN_THRESHOLD = 0.35    # was 0.5; lets near-still real users qualify as "moving" so they
                                # escape Gate C (which requires NOT is_moving).
