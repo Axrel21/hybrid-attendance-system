@@ -13,9 +13,15 @@
 tflite-runtime>=2.13.0
 
 # --- Computer Vision ---
-# If a display (HDMI or VNC) is connected, use opencv-python instead.
-# For headless deployments with HEADLESS=1, opencv-python-headless is fine.
+# GUI mode (HEADLESS=0, native cv2.imshow): use opencv-python and system GTK — see
+#   deployment/OPENCV_GUI_RASPBERRY_PI.md
+# Headless-only: opencv-python-headless is fine.
+# Pick ONE:
 opencv-python-headless==4.8.0.76
+# opencv-python==4.8.0.76
+
+# --- Optional: remote MJPEG (STREAM_VIDEO=1) ---
+# flask>=2.3.0
 
 # --- Numerical ---
 numpy>=1.24.3

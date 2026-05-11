@@ -17,6 +17,8 @@ Raspberry Pi (systemd service, see deployment/attendance.service):
 Environment flags
 -----------------
 HEADLESS=1          Skip all cv2.imshow / display calls (SSH / service mode).
+STREAM_VIDEO=1      Optional Flask MJPEG (remote); requires `pip install flask`.
+STREAM_PORT         MJPEG listen port (default 5000).
 CAMERA_BACKEND      "opencv" (default) or "picamera2" (Pi Camera Module 2).
 VERBOSE_DEBUG=0     Silence per-frame console prints.
 EXPERIMENT_LABEL    Tag all diagnostic rows with a label for offline analysis.
@@ -67,14 +69,20 @@ def main() -> int:
     try:
         from config import settings
         log.info(
-            "Config: SIMULATE_PI=%s  HEADLESS=%s  CAMERA_BACKEND=%s"
+            "Config: SIMULATE_PI=%s  HEADLESS=%s  STREAM_VIDEO=%s  CAMERA_BACKEND=%s"
             "  VERBOSE_DEBUG=%s  EXPERIMENT_LABEL=%r",
             settings.SIMULATE_PI,
             settings.HEADLESS,
+            settings.STREAM_VIDEO,
             settings.CAMERA_BACKEND,
             settings.VERBOSE_DEBUG,
             settings.EXPERIMENT_LABEL,
         )
+        if settings.STREAM_VIDEO:
+            log.info(
+                "MJPEG: http://0.0.0.0:%s/video_feed (use device LAN IP in browser)",
+                settings.STREAM_PORT,
+            )
     except Exception:
         log.exception("Failed to load config.settings — aborting.")
         return 1

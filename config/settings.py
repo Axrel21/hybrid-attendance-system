@@ -110,6 +110,16 @@ VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "1") not in ("0", "false", "Fals
 #     export HEADLESS=1   (bash)   $env:HEADLESS=1 (PowerShell)
 HEADLESS = os.environ.get("HEADLESS", "0") not in ("0", "false", "False", "")
 
+# STREAM_VIDEO — optional Flask MJPEG server for remote debugging / monitoring.
+# Disabled by default. Does not replace native cv2.imshow when HEADLESS=0.
+# Requires: pip install flask
+# Example: HEADLESS=1 STREAM_VIDEO=1 python run.py
+#   then open http://<device-ip>:5000/ in a browser on the LAN.
+STREAM_VIDEO = os.environ.get("STREAM_VIDEO", "0") in ("1", "true", "True", "yes")
+STREAM_HOST = os.environ.get("STREAM_HOST", "0.0.0.0")
+STREAM_PORT = int(os.environ.get("STREAM_PORT", "5000"))
+STREAM_JPEG_QUALITY = int(os.environ.get("STREAM_JPEG_QUALITY", "75"))
+
 # CAMERA_BACKEND — selects the frame-acquisition backend:
 #   "opencv"               — cv2.VideoCapture(0); laptop / USB webcam (default)
 #   "libcamera"            — auto-select GStreamer or subprocess; USE THIS on Pi

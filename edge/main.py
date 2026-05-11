@@ -294,11 +294,51 @@ class FinalHybridEdge:
         if _PSUTIL_AVAILABLE:
             self._psutil_proc = _psutil.Process()
 
+        # Overlays on frame: native window and/or MJPEG viewers need annotations.
+        self._show_overlay = (not settings.HEADLESS) or settings.STREAM_VIDEO
+
+        # Optional MJPEG (secondary to cv2.imshow; off by default).
+        self._stream_set_frame = None
+        if settings.STREAM_VIDEO:
+            try:
+                from edge.stream_server import set_frame, start_stream_server
+            except ImportError as exc:
+                raise ImportError(
+                    "STREAM_VIDEO=1 requires Flask. Install with: pip install flask"
+                ) from exc
+            self._stream_set_frame = set_frame
+            start_stream_server(
+                host=settings.STREAM_HOST,
+                port=settings.STREAM_PORT,
+                daemon=True,
+            )
+            print(
+                f"[STREAM] MJPEG http://{settings.STREAM_HOST}:{settings.STREAM_PORT}/video_feed "
+                f"(browser: http://<this-host>:{settings.STREAM_PORT}/ )"
+            )
+
         # ---- Display window — create once (P5 fix) ----
         # B3: skip entirely in HEADLESS mode (no display available).
         if not settings.HEADLESS:
-            cv2.namedWindow("Hybrid Edge Pipeline", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Hybrid Edge Pipeline", 720, 540)
+            from edge import opencv_highgui
+
+            if not opencv_highgui.skip_gui_precheck():
+                _hg_ok, _hg_detail = opencv_highgui.check_highgui_from_build_info()
+                if not _hg_ok:
+                    raise RuntimeError(
+                        f"{_hg_detail}\n"
+                        "See deployment/OPENCV_GUI_RASPBERRY_PI.md "
+                        "or set SKIP_OPENCV_GUI_CHECK=1 to bypass this check."
+                    )
+            try:
+                cv2.namedWindow("Hybrid Edge Pipeline", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("Hybrid Edge Pipeline", 720, 540)
+            except cv2.error as exc:
+                raise RuntimeError(
+                    "Failed to create OpenCV HighGUI window (HEADLESS=0). "
+                    "Install opencv-python with GTK support, not "
+                    "opencv-python-headless. See deployment/OPENCV_GUI_RASPBERRY_PI.md"
+                ) from exc
 
     # ------------------------------------------------------------------
     def extract_embedding(self, face_img):
@@ -311,7 +351,7 @@ class FinalHybridEdge:
 
     # ------------------------------------------------------------------
     def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
-        """Draw per-track debug overlay. Caller must gate on HEADLESS."""
+        """Draw per-track debug overlay. Caller must gate on ``_show_overlay``."""
         if dbg["decision"] == "NO_MATCH":
             return
 
@@ -601,11 +641,15 @@ class FinalHybridEdge:
                     ])
 
                 finally:
-                    if not settings.HEADLESS:
+                    if self._show_overlay:
                         self._draw_overlay(frame, x, y, fw, fh, track_id, dbg)
                     self._write_diag(loop_start, w, h, track_id, dbg)
 
             prev_gray = curr_gray.copy()
+
+            if self._stream_set_frame is not None:
+                jq = settings.STREAM_JPEG_QUALITY
+                self._stream_set_frame(frame, jq)
 
             # ---- Display (B3: skipped in headless mode) ----
             if not settings.HEADLESS:
