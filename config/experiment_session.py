@@ -67,6 +67,7 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "DEBUG_JPEG_QUALITY",
     "AUTO_EXPERIMENT_REPORT",
 )
+@dataclass
 class ExperimentPaths:
     experiment_id: str
     root: str
