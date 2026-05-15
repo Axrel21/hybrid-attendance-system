@@ -431,7 +431,7 @@ class FinalHybridEdge:
                 if not _hg_ok:
                     raise RuntimeError(
                         f"{_hg_detail}\n"
-                        "See deployment/OPENCV_GUI_RASPBERRY_PI.md "
+                        "See deployment/pi/OPENCV_GUI_RASPBERRY_PI.md "
                         "or set SKIP_OPENCV_GUI_CHECK=1 to bypass this check."
                     )
             try:
@@ -441,7 +441,7 @@ class FinalHybridEdge:
                 raise RuntimeError(
                     "Failed to create OpenCV HighGUI window (HEADLESS=0). "
                     "Install opencv-python with GTK support, not "
-                    "opencv-python-headless. See deployment/OPENCV_GUI_RASPBERRY_PI.md"
+                    "opencv-python-headless. See deployment/pi/OPENCV_GUI_RASPBERRY_PI.md"
                 ) from exc
 
     # ------------------------------------------------------------------

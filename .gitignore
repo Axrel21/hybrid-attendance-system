@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+cloud/.venv/
 env/
 venv/
 ENV/
@@ -234,13 +235,17 @@ diagnostics/
 __pycache__/
 *.pyc
 
-# virtual env
+# Virtual environments
 venv/
-.env
+.venv/
+env/
 
 # models
-models/*.tflite
-models/*.onnx
+models/
+*.onnx
+*.tflite
+*.pth
+
 
 # OS junk
 .DS_Store

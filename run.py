@@ -11,7 +11,7 @@ Raspberry Pi (manual):
     source ~/attendance/venv/bin/activate
     python run.py
 
-Raspberry Pi (systemd service, see deployment/attendance.service):
+Raspberry Pi (systemd service, see deployment/pi/attendance.service):
     sudo systemctl start attendance
 
 Each launch creates an isolated session under experiments/exp_<timestamp>/ with

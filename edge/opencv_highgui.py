@@ -31,7 +31,7 @@ def check_highgui_from_build_info() -> tuple[bool, str]:
         return (
             False,
             "OpenCV reports GUI: NONE (use opencv-python with GTK, not "
-            "opencv-python-headless). See deployment/OPENCV_GUI_RASPBERRY_PI.md",
+            "opencv-python-headless). See deployment/pi/OPENCV_GUI_RASPBERRY_PI.md",
         )
 
     # Positive signals (any one is enough for Linux Pi / desktop)

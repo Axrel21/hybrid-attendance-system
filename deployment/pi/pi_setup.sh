@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deployment/pi_setup.sh
+# deployment/pi/pi_setup.sh
 # ============================================================
 # Raspberry Pi 4 — Conda Python 3.10 environment smoke tests
 # and camera backend validation.
@@ -11,7 +11,7 @@
 #
 # Run AFTER activating the Conda env:
 #   conda activate edgepi
-#   bash deployment/pi_setup.sh
+#   bash deployment/pi/pi_setup.sh
 # ============================================================
 set -euo pipefail
 

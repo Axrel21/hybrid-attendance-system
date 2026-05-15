@@ -1,0 +1,37 @@
+# ArcFace Verification Server — Python dependencies
+#
+# Python 3.10 or 3.11 required.
+# InsightFace has packaging issues on 3.12 as of mid-2025.
+#
+# GPU setup (recommended):
+#   pip install -r requirements.txt
+#
+# CPU-only setup (development / low-budget cloud):
+#   replace onnxruntime-gpu with onnxruntime below, then:
+#   pip install -r requirements.txt
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+
+# CRITICAL: python-multipart is required for FastAPI File + Form parsing.
+# Without this, /verify/image will return HTTP 400 on every request with no
+# useful error message. It is a separate package despite FastAPI not mentioning
+# it prominently in the default install.
+python-multipart==0.0.9
+
+# ── Face recognition ──────────────────────────────────────────────────────────
+insightface==0.7.3
+
+# GPU inference (CUDA 11.8 or 12.x required on host):
+onnxruntime-gpu==1.18.0
+# CPU-only alternative — comment out onnxruntime-gpu above and uncomment:
+# onnxruntime==1.18.0
+
+# ── Computer vision ───────────────────────────────────────────────────────────
+opencv-python-headless==4.9.0.80
+
+# ── Numerical ────────────────────────────────────────────────────────────────
+# Pin below 2.0 — some ONNX model ops have compatibility issues with numpy 2.x
+numpy>=1.24.0,<2.0.0

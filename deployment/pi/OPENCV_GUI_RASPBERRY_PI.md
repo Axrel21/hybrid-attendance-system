@@ -33,7 +33,7 @@ Align the version with `requirements_pi.txt` comments (or pin the same minor as 
 ```bash
 source ~/attendance/venv/bin/activate
 cd /path/to/edge_implementation
-python deployment/validate_opencv_gui.py
+python deployment/pi/validate_opencv_gui.py
 ```
 
 You should see a line like `HighGUI backend: GTK+`, not `GUI: NONE`.
