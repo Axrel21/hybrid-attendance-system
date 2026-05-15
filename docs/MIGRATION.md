@@ -124,3 +124,44 @@ the hybrid offload wire contract are unchanged.
   `cloud/main.py` still hard-code the contract strings; future passes
   can adopt the constants in `shared/contracts.py` once a coordinated
   cross-component update is desired.
+
+---
+
+## Fourth-pass system completion
+
+Builds the cloud-side telemetry / dashboard / WebSocket infrastructure
+and adds a post-session edge uploader. No edge-runtime code changes;
+no schema changes to the existing `diagnostic_log.csv` /
+`telemetry_log.csv` / `attendance_log.csv` / `VerificationResponse`
+shapes. See `docs/system_completion_phase_summary.md` for the full diff
+record.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `cloud_backend/` (new package) | Composite cloud backend: `server.py`, `storage.py`, `schemas.py`, `telemetry/api.py`, `dashboard/api.py`, `dashboard/websocket.py`, `experiments/registry.py`, `analytics/metrics.py`. Mounts on top of `cloud/main.py`; verification unchanged. |
+| `cloud_backend/README.md` | Layout, storage, WS, edge-uploader overview. |
+| `deployment/cloud/run_backend.sh` | Launcher for the composite (verification + telemetry + dashboard + WS). |
+| `edge/telemetry_uploader.py` | Standalone CLI that reads an `experiments/exp_<id>/` directory and posts `/telemetry/sessions/{start,end}` + batched `/telemetry/ingest`. Not imported by the runtime. |
+| `docs/system_completion_phase_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `shared/contracts.py` | Adds telemetry / dashboard / WS path constants, batching defaults, `TELEMETRY_EVENT_TYPES`. |
+| `shared/schemas.py` | Adds `SESSION_METADATA_FIELDS`, `TELEMETRY_EVENT_FIELDS`, `SESSION_SUMMARY_FIELDS`. |
+| `shared/__init__.py` | Re-exports the new constants. |
+| `deployment/cloud/CLOUD_BUNDLE.txt` | Lists `cloud_backend/` + its four subpackages explicitly (rsync `--files-from` does not recurse). |
+| `.gitignore` | Adds `cloud_storage/` and `/dist/`. |
+
+### Intentionally not changed (fourth pass)
+
+- `edge/main.py` and the offload path. The edge runtime keeps its
+  current code; the uploader runs as a separate process.
+- `cloud/main.py`. The composite mounts it; the verification module
+  itself is untouched.
+- Existing CSV schemas and `VerificationResponse` shape.
+- No new dependencies in `cloud/requirements.txt`: `uvicorn[standard]`
+  already provides `websockets`.

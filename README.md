@@ -16,6 +16,7 @@ Telemetry-driven embedded AI pipeline: **YuNet + MobileFaceNet** on the edge, op
 | Stabilization analysis | [docs/STABILIZATION_ANALYSIS.md](docs/STABILIZATION_ANALYSIS.md) |
 | Repository layout (current vs target) | [docs/REPOSITORY_LAYOUT.md](docs/REPOSITORY_LAYOUT.md) |
 | Cross-process contracts | [shared/README.md](shared/README.md) |
+| Composite cloud backend | [cloud_backend/README.md](cloud_backend/README.md) |
 | Cross-cutting deploy helpers | [deployment/common/README.md](deployment/common/README.md) |
 | Layout migration | [docs/MIGRATION.md](docs/MIGRATION.md) |
 | Post-refactor checks | [docs/VALIDATION.md](docs/VALIDATION.md) |
@@ -29,4 +30,19 @@ pip install -r edge/requirements-edge.txt   # Pi / edge
 python run.py
 ```
 
-Cloud (separate host): see `cloud/README.md`.
+Cloud (separate host): see `cloud/README.md` for the verification-only
+server, or `cloud_backend/README.md` for the composite backend
+(verification + telemetry + dashboard + WebSocket).
+
+```bash
+# Composite backend with all routers (requires cloud/requirements.txt):
+bash deployment/cloud/run_backend.sh --host 0.0.0.0 --port 8000
+```
+
+Post-session telemetry upload (separate process; Pi keeps running offline):
+
+```bash
+python -m edge.telemetry_uploader \
+    --session experiments/exp_<id>/ \
+    --cloud http://cloud-host:8000
+```

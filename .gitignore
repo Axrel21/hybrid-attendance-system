@@ -246,6 +246,11 @@ models/
 *.tflite
 *.pth
 
+# cloud_backend filesystem storage (sessions + events)
+cloud_storage/
+
+# packaging output from deployment/common/package_*.sh
+/dist/
 
 # OS junk
 .DS_Store

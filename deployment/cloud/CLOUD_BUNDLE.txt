@@ -8,7 +8,7 @@
 # Maintenance: do NOT add edge/, config/, run.py, research/, or any Pi-only
 # deployment assets. The cloud server is fully isolated from edge runtime.
 
-# --- Server source ---
+# --- Server source: verification ---
 cloud/main.py
 cloud/arcface_verifier.py
 cloud/gallery.py
@@ -16,6 +16,19 @@ cloud/enroll_gallery.py
 cloud/requirements.txt
 cloud/README.md
 cloud/.gitignore
+
+# --- Server source: composite backend (telemetry + dashboard + WS) ---
+# Mounts cloud/main.py and adds /telemetry/*, /api/*, /ws/telemetry.
+# Launched via deployment/cloud/run_backend.sh.
+#
+# Note: rsync's --files-from does not recurse into listed directories,
+# so subpackages must be listed explicitly. Add a line here when a new
+# cloud_backend/<subsystem>/ subdirectory is introduced.
+cloud_backend/
+cloud_backend/telemetry/
+cloud_backend/dashboard/
+cloud_backend/experiments/
+cloud_backend/analytics/
 
 # --- Cross-process contracts (HTTP + CSV schemas) ---
 # Lightweight; safe to ship on the server even though it imports lazily

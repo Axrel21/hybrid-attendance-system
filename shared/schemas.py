@@ -75,10 +75,65 @@ EXPERIMENT_INDEX_FIELDS: Tuple[str, ...] = (
     "experiment_label",
 )
 
+# Session metadata uploaded at session start (edge -> cloud). All optional
+# except ``session_id`` and ``started_at``; the cloud merges this with whatever
+# arrives in the session_end payload.
+SESSION_METADATA_FIELDS: Tuple[str, ...] = (
+    "session_id",
+    "started_at",
+    "ended_at",
+    "experiment_label",
+    "device_id",
+    "hostname",
+    "camera_backend",
+    "headless",
+    "simulate_pi",
+    "thresholds",          # nested dict
+    "hardware",            # nested dict (cpu_model, mem_mb, os, python)
+    "environment",         # nested dict (env-vars that influence runtime)
+    "notes",
+)
+
+# Per-event payload shape (edge -> cloud). Loose union — different
+# event_types populate different subsets of ``fields``.
+TELEMETRY_EVENT_FIELDS: Tuple[str, ...] = (
+    "event_type",          # one of shared.contracts.TELEMETRY_EVENT_TYPES
+    "timestamp_ms",        # producer-side wall clock (ms since epoch)
+    "session_id",
+    "experiment_label",
+    "frame_id",            # optional per-frame ordinal
+    "track_id",            # optional per-track ordinal
+    "fields",              # nested dict — event-specific payload
+)
+
+# Aggregated session summary shape — written at session end by the cloud
+# (or the edge uploader's --finalize flag) once event stream is closed.
+SESSION_SUMMARY_FIELDS: Tuple[str, ...] = (
+    "session_id",
+    "experiment_label",
+    "frames_total",
+    "duration_s",
+    "fps_mean",
+    "fps_std",
+    "matched_total",
+    "spoof_total",
+    "offload_total",
+    "offload_success_total",
+    "edge_cloud_agreement_rate",
+    "mean_cloud_rtt_ms",
+    "mean_jpeg_encode_ms",
+    "thermal_max_c",
+    "cpu_pct_mean",
+    "mem_mb_mean",
+)
+
 
 __all__ = [
     "get_diag_columns",
     "get_telemetry_csv_columns",
     "ATTENDANCE_CSV_COLUMNS",
     "EXPERIMENT_INDEX_FIELDS",
+    "SESSION_METADATA_FIELDS",
+    "TELEMETRY_EVENT_FIELDS",
+    "SESSION_SUMMARY_FIELDS",
 ]

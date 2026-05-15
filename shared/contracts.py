@@ -84,6 +84,48 @@ DEFAULT_JPEG_QUALITY: Final[int] = 85
 DEFAULT_TIMEOUT_S: Final[float] = 2.0
 DEFAULT_CLOUD_PORT: Final[int] = 8000
 
+# ── Telemetry ingestion endpoints (cloud_backend) ─────────────────────────────
+# These are served by ``cloud_backend.server:app`` (the composite backend) and
+# are absent from the verification-only ``cloud.main:app`` entry point.
+TELEMETRY_SESSION_START_PATH: Final[str] = "/telemetry/sessions/start"
+TELEMETRY_SESSION_END_PATH: Final[str] = "/telemetry/sessions/end"
+TELEMETRY_INGEST_PATH: Final[str] = "/telemetry/ingest"
+TELEMETRY_HEALTH_PATH: Final[str] = "/telemetry/healthz"
+
+# ── Dashboard read APIs ───────────────────────────────────────────────────────
+DASHBOARD_API_PREFIX: Final[str] = "/api"
+SESSIONS_LIST_PATH: Final[str] = "/api/sessions"
+SESSION_DETAIL_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}"
+SESSION_TELEMETRY_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/telemetry"
+SESSION_SUMMARY_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/summary"
+EXPERIMENTS_LIST_PATH: Final[str] = "/api/experiments"
+EXPERIMENT_DETAIL_PATH_TEMPLATE: Final[str] = "/api/experiments/{experiment_label}"
+METRICS_AGREEMENT_PATH: Final[str] = "/api/metrics/agreement"
+METRICS_OFFLOAD_PATH: Final[str] = "/api/metrics/offload"
+METRICS_LATENCY_PATH: Final[str] = "/api/metrics/latency"
+
+# ── Live telemetry WebSocket ──────────────────────────────────────────────────
+WS_TELEMETRY_PATH: Final[str] = "/ws/telemetry"
+
+# ── Telemetry batching defaults (edge uploader / ingest endpoint) ─────────────
+DEFAULT_TELEMETRY_BATCH_SIZE: Final[int] = 64
+DEFAULT_TELEMETRY_FLUSH_INTERVAL_S: Final[float] = 10.0
+DEFAULT_TELEMETRY_MAX_QUEUE: Final[int] = 4096
+DEFAULT_TELEMETRY_RETRY_BACKOFF_S: Final[float] = 5.0
+DEFAULT_TELEMETRY_MAX_RETRIES: Final[int] = 3
+
+# Event-type vocabulary (loose; new types are forward-compatible). Listed
+# so dashboards know what to expect when querying /api/sessions/.../telemetry.
+TELEMETRY_EVENT_TYPES: Tuple[str, ...] = (
+    "session_start",
+    "session_end",
+    "frame_telemetry",      # one row per frame (mirrors telemetry_log.csv)
+    "diagnostic",           # one row per (frame, track) decision (mirrors diagnostic_log.csv)
+    "attendance",           # one row per matched event (mirrors attendance_log.csv)
+    "offload",              # one row per cloud verification attempt
+    "report",               # post-run experiment report summary
+)
+
 
 def is_valid_arcface_dim(dim: int) -> bool:
     """Gallery / wire-format guard for the cloud side."""
@@ -112,6 +154,27 @@ __all__ = [
     "DEFAULT_JPEG_QUALITY",
     "DEFAULT_TIMEOUT_S",
     "DEFAULT_CLOUD_PORT",
+    "TELEMETRY_SESSION_START_PATH",
+    "TELEMETRY_SESSION_END_PATH",
+    "TELEMETRY_INGEST_PATH",
+    "TELEMETRY_HEALTH_PATH",
+    "DASHBOARD_API_PREFIX",
+    "SESSIONS_LIST_PATH",
+    "SESSION_DETAIL_PATH_TEMPLATE",
+    "SESSION_TELEMETRY_PATH_TEMPLATE",
+    "SESSION_SUMMARY_PATH_TEMPLATE",
+    "EXPERIMENTS_LIST_PATH",
+    "EXPERIMENT_DETAIL_PATH_TEMPLATE",
+    "METRICS_AGREEMENT_PATH",
+    "METRICS_OFFLOAD_PATH",
+    "METRICS_LATENCY_PATH",
+    "WS_TELEMETRY_PATH",
+    "DEFAULT_TELEMETRY_BATCH_SIZE",
+    "DEFAULT_TELEMETRY_FLUSH_INTERVAL_S",
+    "DEFAULT_TELEMETRY_MAX_QUEUE",
+    "DEFAULT_TELEMETRY_RETRY_BACKOFF_S",
+    "DEFAULT_TELEMETRY_MAX_RETRIES",
+    "TELEMETRY_EVENT_TYPES",
     "is_valid_arcface_dim",
     "is_valid_mobilefacenet_dim",
 ]

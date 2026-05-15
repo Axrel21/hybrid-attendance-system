@@ -138,3 +138,61 @@ bash deployment/common/package_cloud.sh /tmp/_dist
 tar -tzf /tmp/_dist/attendance_pi_*.tar.gz | head
 tar -tzf /tmp/_dist/arcface_server_*.tar.gz | head
 ```
+
+## 13. System completion phase artifacts
+
+- Composite backend launches (requires `cloud/requirements.txt`
+  installed):
+
+```bash
+# Bare verification (legacy)
+cd cloud && uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Composite (verification + telemetry + dashboard + WS)
+bash deployment/cloud/run_backend.sh --host 0.0.0.0 --port 8000
+```
+
+- Sanity GET after composite launch:
+
+```bash
+curl -s http://localhost:8000/backend/info | python3 -m json.tool
+curl -s http://localhost:8000/telemetry/healthz | python3 -m json.tool
+curl -s http://localhost:8000/api/sessions | python3 -m json.tool
+```
+
+- Edge uploader dry-run against an existing session directory:
+
+```bash
+python3 -m edge.telemetry_uploader \
+    --session experiments/exp_<id>/ \
+    --cloud http://localhost:8000 --dry-run
+```
+
+- End-to-end uploader (real POST):
+
+```bash
+python3 -m edge.telemetry_uploader \
+    --session experiments/exp_<id>/ \
+    --cloud http://localhost:8000
+ls cloud_storage/sessions/exp_<id>/   # metadata.json events.jsonl summary.json
+```
+
+- WebSocket smoke (requires `websocat` or similar):
+
+```bash
+websocat ws://localhost:8000/ws/telemetry
+# expect: {"type":"hello","session_filter":null,...}
+# subsequent /telemetry/ingest POSTs should produce telemetry_batch frames
+```
+
+- Storage and analytics smoke (numpy only — no fastapi required):
+
+```bash
+python3 -c "
+from cloud_backend.storage import get_default_storage
+from cloud_backend.analytics import metrics
+import numpy as np
+print(metrics.eer(np.random.randn(200), np.random.randint(0,2,200)))
+print(get_default_storage().list_sessions())
+"
+```
