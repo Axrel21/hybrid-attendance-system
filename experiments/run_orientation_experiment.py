@@ -5,7 +5,9 @@ experiments/run_orientation_experiment.py
 Thin launcher for tagged orientation calibration sessions. Sets the
 EXPERIMENT_LABEL environment variable so every diagnostic_log.csv row
 written during this run carries that tag, then invokes the existing
-edge.main pipeline. No pipeline behaviour is altered.
+edge.main pipeline. Recognition and liveness still require the strict
+detector–tracker IoU match; optional best-effort pose fields may be filled
+on NO_MATCH rows for telemetry (see POSE_TELEMETRY_MIN_IOU in settings).
 
 The launcher also writes a session-marker record to
 data/experiment_sessions.jsonl (label, notes, timestamps, and the
@@ -92,6 +94,7 @@ def _record_session(label: str, notes: str) -> None:
             "ORIENTATION_OVERHEAD_TH":    settings.ORIENTATION_OVERHEAD_TH,
             "ORIENTATION_TILTED_TH":      settings.ORIENTATION_TILTED_TH,
             "ORIENTATION_SMOOTHING_WINDOW": settings.ORIENTATION_SMOOTHING_WINDOW,
+            "POSE_TELEMETRY_MIN_IOU":     settings.POSE_TELEMETRY_MIN_IOU,
             "MATCH_HIGH_BASE":            settings.MATCH_HIGH_BASE,
             "MATCH_MID_BASE":             settings.MATCH_MID_BASE,
             "MIN_DISTANCE":               settings.MIN_DISTANCE,

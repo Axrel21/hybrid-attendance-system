@@ -75,6 +75,58 @@ MODE_COLORS = {
     "NA": "#7f7f7f",
 }
 
+def _print_orientation_gating_report(df: pd.DataFrame) -> None:
+    """
+    Summarise rows where pose telemetry was never attached (orient_ratio==0 /
+    mode_raw NA) vs. the pipeline decision — usually tracker vs detector IoU
+    drift or early continue before estimate_mode().
+    Prefer explicit ``orientation_active`` when the diagnostic schema includes it.
+    """
+    n = len(df)
+    if n == 0:
+        print("\n[orientation gating] No rows in slice.\n")
+        return
+    if "orientation_active" in df.columns:
+        active = df["orientation_active"].astype(int) == 1
+        inactive = ~active
+        print("\n--- Orientation telemetry gating (full diagnostic slice) ---")
+        print(f"Rows: {n}")
+        print(
+            f"  orientation_active=0: {int(inactive.sum())} "
+            f"({100.0 * inactive.mean():.1f}%)"
+        )
+        print(
+            f"  orientation_active=1 (pose ran): {int(active.sum())} "
+            f"({100.0 * active.mean():.1f}%)"
+        )
+    else:
+        na_raw = df["mode_raw"].astype(str).str.upper().eq("NA")
+        zero_ratio = df["orient_ratio"] <= 0
+        inactive = zero_ratio & na_raw
+        active = ~(zero_ratio & na_raw)
+        print("\n--- Orientation telemetry gating (full diagnostic slice) ---")
+        print(f"Rows: {n}")
+        print(
+            f"  Inactive (orient_ratio<=0 & mode_raw==NA): {int(inactive.sum())} "
+            f"({100.0 * inactive.mean():.1f}%)"
+        )
+        print(
+            f"  Active pose fields populated: {int(active.sum())} "
+            f"({100.0 * active.mean():.1f}%)"
+        )
+    if inactive.any() and "decision" in df.columns:
+        sub = df.loc[inactive, "decision"].astype(str).value_counts()
+        print("  Inactive rows by decision:")
+        for d, c in sub.items():
+            print(f"    {d}: {c}")
+    if "orientation_active" in df.columns:
+        print(
+            "Analysis histograms below use only rows with orientation_active=1.\n"
+        )
+    else:
+        print("Analysis histograms below use only active rows (orient_ratio > 0).\n")
+
+
 DECISION_COLORS = {
     "MATCHED": "#2ca02c",
     "OFFLOAD_TO_CLOUD": "#1f77b4",
@@ -109,17 +161,20 @@ def load_diag(path: str, label: Optional[str] = None) -> pd.DataFrame:
             f"old log was auto-rotated to diagnostic_log.archived_*.csv."
         )
 
-    # Filter to rows where pose was actually computed (orient_ratio > 0).
-    # rows where the pipeline short-circuited before orientation ran
-    # carry orient_ratio = 0.0 and would distort the histogram.
-    df = df[df["orient_ratio"] > 0].copy()
-
     if label is not None:
         if "experiment_label" not in df.columns:
             raise ValueError("--label given but log has no experiment_label column")
         df = df[df["experiment_label"].astype(str) == label].copy()
         if df.empty:
             raise ValueError(f"No rows with experiment_label='{label}'")
+
+    _print_orientation_gating_report(df)
+
+    # Filter to rows where pose ran (explicit flag preferred).
+    if "orientation_active" in df.columns:
+        df = df[df["orientation_active"].astype(int) == 1].copy()
+    else:
+        df = df[df["orient_ratio"] > 0].copy()
 
     return df
 
@@ -426,7 +481,12 @@ def print_summary(df: pd.DataFrame, suggestions: dict) -> None:
     print("ORIENTATION SUBSYSTEM -- VALIDATION REPORT")
     print("=" * 64)
 
-    print(f"\nTotal frames analysed (orient_ratio > 0): {len(df)}")
+    filt_desc = (
+        "orientation_active=1"
+        if "orientation_active" in df.columns
+        else "orient_ratio > 0"
+    )
+    print(f"\nTotal frames analysed ({filt_desc}): {len(df)}")
     print(f"Distinct tracks: {df['track_id'].nunique() if 'track_id' in df.columns else 'NA'}")
     if "experiment_label" in df.columns:
         labels = sorted(df["experiment_label"].astype(str).unique())

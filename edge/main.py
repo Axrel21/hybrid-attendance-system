@@ -69,6 +69,11 @@ from edge.orientation import PoseEstimator
 from edge.pipeline_controller import PipelineController
 from edge.utils import is_valid_face
 
+
+# Track 2 — hybrid cloud verification
+from edge.cloud_client import CloudVerificationClient, OffloadOutcome
+from edge.offload_router import create_router
+
 # -----------------------------------------------------------------
 # Absolute paths — derived from this file's location.
 # Removed the fragile `from enrollment.enroll import DATA_DIR` import
@@ -176,6 +181,25 @@ def find_best_face_match(tracker_box, detected_faces, iou_threshold=0.3):
     return best_match if max_iou >= iou_threshold else None
 
 
+def _best_valid_face_by_iou(tracker_box, valid_faces):
+    """
+    Return (face_row, iou) for the valid detection with highest IoU to tracker_box,
+    or (None, -1.0) if valid_faces is empty.
+    Used for orientation telemetry when the strict pipeline IoU gate fails.
+    """
+    if not valid_faces:
+        return None, -1.0
+    best = None
+    best_iou = -1.0
+    for face in valid_faces:
+        face_box = (int(face[0]), int(face[1]), int(face[2]), int(face[3]))
+        iou = calculate_iou(tracker_box, face_box)
+        if iou > best_iou:
+            best_iou = iou
+            best = face
+    return best, best_iou
+
+
 # =================================================================
 # Diagnostic CSV schema — single source of truth
 # =================================================================
@@ -199,6 +223,8 @@ DIAG_COLUMNS = [
     # --- orientation calibration block ---
     "face_w",     "face_h",
     "mode_raw",   "orient_ratio","eye_dist_px","vertical_dist_px",
+    "orientation_active",  # 1 iff PoseEstimator.estimate_mode ran this row (telemetry only)
+    "avg_blur",           # mean Laplacian variance over liveness window (face crop)
     # --- recognition pool tracing ---
     "pool_used",  "pool_size",  "num_identities",
     # --- session tag ---
@@ -207,6 +233,10 @@ DIAG_COLUMNS = [
     "t_detect_ms","t_liveness_ms","t_embed_ms","t_match_ms",
     "fps_rolling",
     "cpu_pct",    "mem_mb",     "cpu_temp_c",
+        # --- Track 2: hybrid cloud verification ---
+    "cloud_outcome", "cloud_identity", "cloud_arcface_confidence",
+    "cloud_verified", "cloud_rtt_ms", "cloud_server_total_ms",
+    "jpeg_encode_ms", "image_size_bytes", "edge_cloud_agree",
 ]
 
 
@@ -305,6 +335,27 @@ class FinalHybridEdge:
                 "Tagging session EXPERIMENT_LABEL=%r",
                 settings.EXPERIMENT_LABEL,
             )
+
+        # ---- Track 2: cloud verification client + offload router ----
+        _cloud_url = os.environ.get("CLOUD_SERVER_URL", "http://localhost:8000")
+        self.cloud_client = CloudVerificationClient(
+            server_url=_cloud_url,
+            timeout_s=float(os.environ.get("CLOUD_TIMEOUT_S", "2.0")),
+            jpeg_quality=int(os.environ.get("CLOUD_JPEG_QUALITY", "85")),
+        )
+        _routing_strategy = os.environ.get("CLOUD_ROUTING", "threshold")
+        _force_offload    = os.environ.get("CLOUD_FORCE_OFFLOAD", "0") == "1"
+        _force_edge       = os.environ.get("CLOUD_FORCE_EDGE",    "0") == "1"
+        self.offload_router = create_router(
+            _routing_strategy,
+            threshold=float(os.environ.get("CLOUD_THRESHOLD", "0.65")),
+            force_offload=_force_offload,
+            force_edge=_force_edge,
+        )
+        LOG_RUNTIME.info(
+            "Cloud client → %s | routing=%s | force_offload=%s | force_edge=%s",
+            _cloud_url, _routing_strategy, _force_offload, _force_edge,
+        )
 
         # ---- Performance instrumentation state ----
         self._frame_count  = 0
@@ -455,6 +506,8 @@ class FinalHybridEdge:
             int(dbg["face_w"]), int(dbg["face_h"]),
             dbg["mode_raw"],        round(dbg["orient_ratio"],      4),
             round(dbg["eye_dist_px"],     2), round(dbg["vertical_dist_px"],  2),
+            int(dbg["orientation_active"]),
+            round(float(dbg["avg_blur"]), 4),
             # recognition pool tracing
             dbg["pool_used"],       int(dbg["pool_size"]),  int(dbg["num_identities"]),
             # session tag
@@ -465,6 +518,16 @@ class FinalHybridEdge:
             round(dbg["fps_rolling"],   2),
             round(dbg["cpu_pct"],  1), round(dbg["mem_mb"],      1),
             round(dbg["cpu_temp_c"], 1),
+            # Track 2: hybrid cloud verification
+            dbg.get("cloud_outcome"),
+            dbg.get("cloud_identity"),
+            dbg.get("cloud_arcface_confidence"),
+            dbg.get("cloud_verified"),
+            dbg.get("cloud_rtt_ms"),
+            dbg.get("cloud_server_total_ms"),
+            dbg.get("jpeg_encode_ms"),
+            dbg.get("image_size_bytes"),
+            dbg.get("edge_cloud_agree"),
         ])
 
     # ------------------------------------------------------------------
@@ -586,6 +649,8 @@ class FinalHybridEdge:
                     "face_w": fw, "face_h": fh,
                     "mode_raw": "NA", "orient_ratio": 0.0,
                     "eye_dist_px": 0.0, "vertical_dist_px": 0.0,
+                    "orientation_active": 0,
+                    "avg_blur": 0.0,
                     # recognition pool tracing
                     "pool_used": "NA", "pool_size": 0,
                     "num_identities": len(self.controller.db),
@@ -599,10 +664,57 @@ class FinalHybridEdge:
                     "mem_mb":        self._mem_mb,
                     "cpu_temp_c":    self._cpu_temp_c,
                     "_yunet_score":  None,
+                    # Track 2: cloud fields — None until an offload fires
+                    "cloud_outcome":            None,
+                    "cloud_identity":           None,
+                    "cloud_arcface_confidence": None,
+                    "cloud_verified":           None,
+                    "cloud_rtt_ms":             None,
+                    "cloud_server_total_ms":    None,
+                    "jpeg_encode_ms":           None,
+                    "image_size_bytes":         None,
+                    "edge_cloud_agree":         None,
                 }
 
                 try:
                     matched_face = find_best_face_match(box, valid_faces, iou_threshold=0.3)
+
+                    landmarks = None
+                    yunet_row_for_score = None
+                    if matched_face is not None:
+                        landmarks = [
+                            (int(matched_face[4 + 2 * j]), int(matched_face[4 + 2 * j + 1]))
+                            for j in range(5)
+                        ]
+                        yunet_row_for_score = matched_face
+                    elif (
+                        settings.POSE_TELEMETRY_MIN_IOU > 0.0
+                        and valid_faces
+                    ):
+                        loose_face, loose_iou = _best_valid_face_by_iou(box, valid_faces)
+                        if loose_face is not None and loose_iou >= settings.POSE_TELEMETRY_MIN_IOU:
+                            landmarks = [
+                                (int(loose_face[4 + 2 * j]), int(loose_face[4 + 2 * j + 1]))
+                                for j in range(5)
+                            ]
+                            yunet_row_for_score = loose_face
+
+                    if landmarks is not None:
+                        mode = self.pose_est.estimate_mode(track_id, landmarks)
+                        dbg["mode"] = mode
+                        orient_meta = self.pose_est.last_metrics.get(track_id, {})
+                        dbg["mode_raw"] = orient_meta.get("mode_raw", "NA")
+                        dbg["orient_ratio"] = float(orient_meta.get("ratio", 0.0))
+                        dbg["eye_dist_px"] = float(orient_meta.get("eye_dist", 0.0))
+                        dbg["vertical_dist_px"] = float(
+                            orient_meta.get("vertical_dist", 0.0)
+                        )
+                        if (
+                            yunet_row_for_score is not None
+                            and yunet_row_for_score.shape[0] >= 15
+                        ):
+                            dbg["_yunet_score"] = float(yunet_row_for_score[-1])
+                        dbg["orientation_active"] = 1
 
                     if matched_face is None:
                         self.embedding_buffers.pop(track_id, None)
@@ -613,22 +725,6 @@ class FinalHybridEdge:
                         dbg["rsn"]      = "No detection match"
                         dbg["decision"] = "NO_MATCH"
                         continue
-
-                    landmarks = [
-                        (int(matched_face[4 + 2*j]), int(matched_face[4 + 2*j + 1]))
-                        for j in range(5)
-                    ]
-                    if matched_face.shape[0] >= 15:
-                        dbg["_yunet_score"] = float(matched_face[-1])
-
-                    mode         = self.pose_est.estimate_mode(track_id, landmarks)
-                    dbg["mode"]  = mode
-
-                    orient_meta              = self.pose_est.last_metrics.get(track_id, {})
-                    dbg["mode_raw"]          = orient_meta.get("mode_raw",      "NA")
-                    dbg["orient_ratio"]      = float(orient_meta.get("ratio",       0.0))
-                    dbg["eye_dist_px"]       = float(orient_meta.get("eye_dist",    0.0))
-                    dbg["vertical_dist_px"]  = float(orient_meta.get("vertical_dist", 0.0))
 
                     distance         = settings.K_FOCAL / (np.sqrt(fw * fh) + 1e-5)
                     dbg["distance"]  = float(distance)
@@ -654,6 +750,7 @@ class FinalHybridEdge:
                     dbg["avg_mag_var"]  = float(sig.get("avg_mag_var",   0.0))
                     dbg["avg_area_var"] = float(sig.get("avg_area_var",  0.0))
                     dbg["rigid_ratio"]  = float(sig.get("rigid_ratio",   0.0))
+                    dbg["avg_blur"]     = float(sig.get("avg_blur",     0.0))
 
                     if lbl == "SPOOF":
                         self.embedding_buffers.pop(track_id, None)
@@ -711,10 +808,72 @@ class FinalHybridEdge:
                         if time.time() - self.cooldowns.get(identity, 0) > 300:
                             self.cooldowns[identity] = time.time()
                             LOG_RUNTIME.info("Attendance marked: %s", identity)
+                    #offloading algorithm
                     elif sim >= th_mid:
                         dbg["decision"] = "OFFLOAD_TO_CLOUD"
-                        if settings.VERBOSE_DEBUG:
-                            LOG_DEBUG.debug("Offloading to ArcFace server (sim in mid band)")
+ 
+                        routing = self.offload_router.decide(edge_confidence=sim)
+ 
+                        if routing.should_offload and self.cloud_client.is_healthy() and aligned is not None:
+                            cloud_result = self.cloud_client.verify(
+                                face_crop_bgr=aligned,
+                                edge_confidence=sim,
+                                edge_candidate=identity,
+                                session_id=settings.EXPERIMENT_LABEL,
+                                frame_id=frame_idx,
+                                track_id=track_id,
+                                routing_strategy=routing.strategy_name,
+                            )
+ 
+                            dbg["cloud_outcome"]  = cloud_result.outcome.value
+                            dbg["cloud_rtt_ms"]   = round(cloud_result.rtt_ms, 2)
+                            dbg["jpeg_encode_ms"] = round(cloud_result.jpeg_encode_ms, 2)
+                            dbg["image_size_bytes"] = cloud_result.image_size_bytes
+ 
+                            if cloud_result.succeeded:
+                                dbg["cloud_identity"]           = cloud_result.identity
+                                dbg["cloud_arcface_confidence"] = round(cloud_result.arcface_confidence, 4)
+                                dbg["cloud_verified"]           = cloud_result.verified
+                                dbg["cloud_server_total_ms"]    = round(cloud_result.server_total_ms, 2)
+                                dbg["edge_cloud_agree"]         = cloud_result.edge_cloud_agree
+ 
+                                if cloud_result.verified and cloud_result.identity:
+                                    identity        = cloud_result.identity
+                                    dbg["identity"] = identity
+                                    dbg["decision"] = "MATCHED"
+                                    if time.time() - self.cooldowns.get(identity, 0) > 300:
+                                        self.cooldowns[identity] = time.time()
+                                        LOG_RUNTIME.info("Attendance marked (cloud): %s", identity)
+ 
+                                if hasattr(self.offload_router, "feedback") \
+                                        and cloud_result.edge_cloud_agree is not None:
+                                    self.offload_router.feedback(agreed=cloud_result.edge_cloud_agree)
+ 
+                                if settings.VERBOSE_DEBUG:
+                                    LOG_DEBUG.debug(
+                                        "Cloud verified: identity=%s score=%.4f rtt=%.0fms agree=%s",
+                                        cloud_result.identity, cloud_result.arcface_confidence,
+                                        cloud_result.rtt_ms, cloud_result.edge_cloud_agree,
+                                    )
+                            else:
+                                if settings.VERBOSE_DEBUG:
+                                    LOG_DEBUG.debug(
+                                        "Cloud offload failed: %s — keeping edge decision",
+                                        cloud_result.outcome.value,
+                                    )
+                        else:
+                            dbg["cloud_outcome"] = (
+                                "skipped_circuit_breaker" if not self.cloud_client.is_healthy()
+                                else "skipped_no_crop" if aligned is None
+                                else "skipped_router"
+                            )
+                            if settings.VERBOSE_DEBUG:
+                                LOG_DEBUG.debug(
+                                    "Offload skipped: healthy=%s should_offload=%s aligned=%s",
+                                    self.cloud_client.is_healthy(),
+                                    routing.should_offload,
+                                    aligned is not None,
+                                )
                     else:
                         dbg["decision"] = "BELOW_THRESHOLD"
 

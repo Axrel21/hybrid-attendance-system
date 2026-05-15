@@ -107,6 +107,13 @@ ORIENTATION_OVERHEAD_TH = 0.60
 ORIENTATION_TILTED_TH   = 0.915
 ORIENTATION_SMOOTHING_WINDOW = 5  # majority-vote temporal window length
 
+# Minimum IoU between the tracker box and a YuNet face to attach *orientation
+# telemetry* when the strict pipeline match (DETECTION_MATCH_IOU in main) fails.
+# Tracker boxes can lag detector outputs on some camera backends; without this,
+# diagnostic rows show orient_ratio=0 / mode_raw=NA even while faces are present.
+# Set to 0.0 to disable best-effort telemetry association. Tunable via env.
+POSE_TELEMETRY_MIN_IOU = float(os.environ.get("POSE_TELEMETRY_MIN_IOU", "0.12"))
+
 # Free-form label stamped on every diagnostic row for the duration of a
 # capture session. Pulled from the EXPERIMENT_LABEL env var so a single
 # command-line export ('frontal_2m', 'overhead_3m', 'tilted_close', ...)
