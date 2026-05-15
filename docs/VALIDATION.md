@@ -367,3 +367,33 @@ curl -s "http://localhost:8000/api/evaluation/thermal?session_id=exp_001" | pyth
 curl -s "http://localhost:8000/api/evaluation/offload_efficiency?session_id=exp_001" | python3 -m json.tool
 curl -s "http://localhost:8000/api/evaluation/latency?session_id=exp_001" | python3 -m json.tool
 ```
+
+## 17. Runtime stabilization phase artifacts (eighth pass)
+
+- Five offline diagnostics, each emits a sidecar JSON under
+  `experiments/exp_<id>/summaries/`:
+
+```bash
+python3 -m research.analysis.orientation_diagnostics    --session experiments/exp_<id>/
+python3 -m research.analysis.yunet_stabilization        --session experiments/exp_<id>/
+python3 -m research.analysis.recognition_stabilization  --session experiments/exp_<id>/
+python3 -m research.analysis.pad_stabilization          --session experiments/exp_<id>/
+python3 -m research.analysis.offload_performance        --session experiments/exp_<id>/
+```
+
+- Output paths (one JSON per analyzer):
+
+```bash
+ls experiments/exp_<id>/summaries/
+# orientation_diagnostics.json, yunet_stabilization.json,
+# recognition_stabilization.json, pad_stabilization.json,
+# offload_performance.json (in addition to earlier-pass artefacts)
+```
+
+- Order-of-magnitude expectations from the reference data:
+  - `orientation_diagnostics.valid_fraction` ≥ 0.20
+  - `yunet_stabilization.persistence.mean_active_fraction` ≥ 0.25 on Pi
+  - `recognition_stabilization.sim_volatility.sim_std_mean` ≤ 0.25
+  - `pad_stabilization.pad_stability_score` ≥ 0.30 for genuine sessions
+  - `offload_performance.cadence.cv` ≤ 0.30
+  - `offload_performance.cpu_hotspots.rows[0].stage == "t_detect_ms"` (always)

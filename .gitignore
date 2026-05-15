@@ -252,6 +252,10 @@ cloud_storage/
 # packaging output from deployment/common/package_*.sh
 /dist/
 
+# Reference experiment archive (large; analysis output lives in
+# docs/reference_experiment_analysis.md — the zip itself is not source).
+/reference_experiments.zip
+
 # OS junk
 .DS_Store
 Thumbs.db

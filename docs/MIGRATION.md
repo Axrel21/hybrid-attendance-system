@@ -300,3 +300,40 @@ See `docs/calibration_and_stabilization_framework_summary.md`.
   in `cloud_storage/`.
 - No new dependencies; offline tooling reuses pandas + numpy, cloud
   uses numpy.
+
+---
+
+## Eighth pass — Runtime stabilization (new branch)
+
+Runs on its own branch (`runtime-stabilization-phase`) per the phase
+brief. Measurement-only; no runtime / schema / manifest / contract
+changes. Companion docs:
+`docs/reference_experiment_analysis.md` (Task A) and
+`docs/runtime_stabilization_phase_summary.md` (this pass's record).
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `research/analysis/orientation_diagnostics.py` | Pose-pipeline sentinel / reachability / landmark-anomaly diagnostics + percentile-based threshold recommendation. |
+| `research/analysis/yunet_stabilization.py` | Per-track bbox-jitter quantification (EMA simulator), persistence + gap stats, geometry / blur / proximity quality bundle. |
+| `research/analysis/recognition_stabilization.py` | Sim volatility + EMA-on-sim simulator (three α) + matched-rate-at-threshold (raw vs smoothed) + identity persistence. |
+| `research/analysis/pad_stabilization.py` | Composite PAD stability score combining real-dominance, hysteresis, transitions, rigid-ratio stability, replay safety. |
+| `research/analysis/offload_performance.py` | Rolling offload volatility + threshold-boundary diagnostics + CPU hotspot share + cadence stats. |
+| `docs/reference_experiment_analysis.md` | Detailed findings from `reference_experiments.zip`. |
+| `docs/runtime_stabilization_phase_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `.gitignore` | `/reference_experiments.zip` added so the large archive stays out of source. |
+
+### Intentionally not changed (eighth pass)
+
+- `edge/main.py`, `edge/orientation.py`, `edge/cloud_client.py`,
+  `edge/offload_router.py`, `cloud/main.py`, `cloud_backend/*`,
+  `config/experiment_session.py`, `config/settings.py`.
+- All existing CSV schemas.
+- Deployment manifests, `cloud/requirements.txt`, shared contracts.
+- No new dependencies — every new analyzer reuses pinned pandas + numpy.
