@@ -160,6 +160,17 @@ SESSION_CATEGORY_FIELDS: Tuple[str, ...] = (
     "distance_bucket",        # "close" (<1m) / "mid" (1-2.5m) / "far" (>2.5m)
 )
 
+# Quality-tag row shape — emitted per session by research.analysis.quality_gates
+# and mirrored by cloud_backend.analytics.quality. Each tag carries severity
+# and the metric evidence that triggered it so the dashboard can show "why".
+QUALITY_TAG_FIELDS: Tuple[str, ...] = (
+    "tag",                    # member of QUALITY_TAGS
+    "severity",               # member of QUALITY_SEVERITIES
+    "value",                  # numeric value that triggered the tag
+    "threshold",              # threshold the value exceeded
+    "detail",                 # short human-readable explanation
+)
+
 
 __all__ = [
     "get_diag_columns",
@@ -171,4 +182,5 @@ __all__ = [
     "SESSION_SUMMARY_FIELDS",
     "EXPERIMENT_PROTOCOL_FIELDS",
     "SESSION_CATEGORY_FIELDS",
+    "QUALITY_TAG_FIELDS",
 ]

@@ -23,7 +23,7 @@ Compatibility:
 """
 from __future__ import annotations
 
-from typing import Final, Tuple
+from typing import Dict, Final, Tuple
 
 # ── Contract identity ─────────────────────────────────────────────────────────
 CONTRACT_VERSION: Final[str] = "1.0"
@@ -214,6 +214,63 @@ STABILIZATION_METRIC_KEYS: Tuple[str, ...] = (
     "thermal_throttle_warnings",
 )
 
+# ── Quality-gate tags (vocab for /api/metrics/quality_tags) ───────────────────
+# Soft tags; presence in a session's tag list signals an observability issue,
+# never a runtime rejection. The brief lists examples explicitly; the rest are
+# documented derivations.
+QUALITY_TAGS: Tuple[str, ...] = (
+    "unstable_camera",        # bbox area CV exceeds threshold
+    "excessive_blur",         # mean avg_blur below threshold
+    "low_light",              # mean brightness below threshold
+    "excessive_proximity",    # fraction of distance frames near MIN_DISTANCE
+    "unstable_tracking",      # detection persistence mean below threshold
+    "thermal_warning",        # cpu_temp_c over threshold fraction
+    "low_confidence_run",     # mean sim across REAL frames below threshold
+    "frequent_spoof_flips",   # PAD label flip rate exceeds threshold
+    "excessive_offload",      # OFFLOAD_TO_CLOUD fraction exceeds threshold
+    "identity_flicker",       # any track sees N+ distinct identities
+    "orientation_unstable",   # mode flip rate mean exceeds threshold
+    "high_offload_failure",   # cloud_outcome != "success" rate too high
+)
+
+# Soft severity labels emitted with each tag. "info" never blocks; "warn"
+# surfaces in dashboards; "alert" is the loudest signal but still soft.
+QUALITY_SEVERITIES: Tuple[str, ...] = ("info", "warn", "alert")
+
+# Default thresholds for the gate evaluator. These are research-grade
+# starting values; sessions tag aggressively rather than miss. Operators
+# override via the CLI ``--threshold KEY=VALUE`` syntax.
+QUALITY_GATE_DEFAULTS: Dict[str, float] = {
+    "bbox_area_cv_warn": 0.30,
+    "bbox_area_cv_alert": 0.60,
+    "blur_p50_warn": 80.0,        # avg_blur is Laplacian variance; smaller = blurrier
+    "blur_p50_alert": 40.0,
+    "brightness_p50_warn": 60.0,  # 8-bit mean
+    "brightness_p50_alert": 30.0,
+    "proximity_close_frac_warn": 0.15,    # fraction of frames within 0.5m of MIN_DISTANCE
+    "proximity_close_frac_alert": 0.30,
+    "active_fraction_warn": 0.70,         # detection_persistence.mean_active_fraction
+    "active_fraction_alert": 0.40,
+    "thermal_over_rate_warn": 0.05,
+    "thermal_over_rate_alert": 0.20,
+    "sim_real_mean_warn": 0.65,
+    "sim_real_mean_alert": 0.50,
+    "pad_flip_rate_warn": 0.05,
+    "pad_flip_rate_alert": 0.15,
+    "offload_rate_warn": 0.20,
+    "offload_rate_alert": 0.40,
+    "identity_distinct_warn": 2,          # per-track distinct identity count
+    "identity_distinct_alert": 4,
+    "mode_flip_rate_warn": 0.10,
+    "mode_flip_rate_alert": 0.25,
+    "offload_failure_rate_warn": 0.20,
+    "offload_failure_rate_alert": 0.50,
+}
+
+# ── Quality / stabilization endpoints (cloud_backend, pass 6) ─────────────────
+METRICS_QUALITY_TAGS_PATH: Final[str] = "/api/metrics/quality_tags"
+SESSION_QUALITY_TAGS_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/quality_tags"
+
 
 def is_valid_arcface_dim(dim: int) -> bool:
     """Gallery / wire-format guard for the cloud side."""
@@ -278,6 +335,11 @@ __all__ = [
     "MOUNTING_LABELS",
     "MOVEMENT_LABELS",
     "STABILIZATION_METRIC_KEYS",
+    "QUALITY_TAGS",
+    "QUALITY_SEVERITIES",
+    "QUALITY_GATE_DEFAULTS",
+    "METRICS_QUALITY_TAGS_PATH",
+    "SESSION_QUALITY_TAGS_PATH_TEMPLATE",
     "is_valid_arcface_dim",
     "is_valid_mobilefacenet_dim",
 ]

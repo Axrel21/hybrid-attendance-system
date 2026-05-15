@@ -269,3 +269,53 @@ curl -s http://localhost:8000/api/metrics/threshold_sweep | python3 -m json.tool
 curl -s http://localhost:8000/api/sessions/exp_<id>/protocol | python3 -m json.tool
 curl -s http://localhost:8000/api/sessions/exp_<id>/category | python3 -m json.tool
 ```
+
+## 15. Runtime stabilization readiness artifacts
+
+- Gap-filling runtime diagnostics:
+
+```bash
+python3 -m research.analysis.runtime_diagnostics \
+    --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/runtime_diagnostics.json
+```
+
+- Quality gates (default thresholds):
+
+```bash
+python3 -m research.analysis.quality_gates \
+    --session experiments/exp_<id>/
+# Override one threshold for an outdoor session
+python3 -m research.analysis.quality_gates \
+    --session experiments/exp_<id>/ \
+    --threshold brightness_p50_alert=20.0
+```
+
+- One-shot bundle (every analyzer + protocol + Markdown):
+
+```bash
+python3 -m research.analysis.stabilization_report \
+    --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/stabilization_report.{json,md}
+```
+
+- Cloud-side quality evaluation on synthetic events (numpy only):
+
+```bash
+python3 -c "
+from cloud_backend.analytics import quality
+events = [{'event_type':'diagnostic','track_id':1,
+           'fields':{'distance':0.45,'brightness':25.0,'avg_blur':35.0,
+                     'decision':'OFFLOAD_TO_CLOUD','lbl':'REAL','sim':0.40,
+                     'cpu_temp_c':85.0,'cloud_outcome':'timeout',
+                     'identity':'s1','mode_raw':'FRONTAL','face_w':120,'face_h':140}}]
+print(quality.evaluate(events))
+"
+```
+
+- Cloud endpoints (server running):
+
+```bash
+curl -s http://localhost:8000/api/metrics/quality_tags?session_id=exp_<id> | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/sessions/exp_<id>/quality_tags | python3 -m json.tool | head -40
+```

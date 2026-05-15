@@ -214,3 +214,46 @@ record.
   manifests, and `cloud/requirements.txt`.
 - No new dependencies. The offline analyzers reuse the pinned `pandas` /
   `numpy` on the edge; cloud analytics use `numpy` (already pinned).
+
+---
+
+## Sixth-pass edge runtime stabilization readiness
+
+Adds the observability layer needed for upcoming controlled experiments:
+gap-filling runtime diagnostics, twelve soft quality tags with
+configurable thresholds, a single-command stabilization report bundler,
+and the cloud-side mirror. Edge runtime, deployment topology, and CSV
+schemas are unchanged. See
+`docs/runtime_stabilization_readiness_summary.md` for the full diff
+record.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `research/analysis/runtime_diagnostics.py` | Gap-filling helpers — YuNet (proximity, missed-detection, unstable tracks), recognition (identity flicker, track summary, orientation/distance × sim), PAD (rigid-ratio temporal, spoof transitions, replay pattern, hysteresis). |
+| `research/analysis/quality_gates.py` | Twelve-tag soft gate evaluator with severity and per-tag thresholds. |
+| `research/analysis/stabilization_report.py` | One-shot bundler: stabilization + runtime + threshold sweep + tags + protocol sidecar → `stabilization_report.json` (+ Markdown). |
+| `cloud_backend/analytics/quality.py` | Cloud-side mirror of the gate evaluator over the JSONL event stream. |
+| `docs/QUALITY_GATES.md` | Tag catalogue + thresholds. |
+| `docs/RUNTIME_DIAGNOSTICS.md` | Function reference. |
+| `docs/runtime_stabilization_readiness_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `shared/contracts.py` | `QUALITY_TAGS`, `QUALITY_SEVERITIES`, `QUALITY_GATE_DEFAULTS`, two endpoint paths/templates. |
+| `shared/schemas.py` | `QUALITY_TAG_FIELDS` row shape. |
+| `shared/__init__.py` | Re-exports. |
+| `cloud_backend/analytics/__init__.py` | Wires `quality` submodule. |
+| `cloud_backend/dashboard/api.py` | Two new endpoints: `/api/metrics/quality_tags`, `/api/sessions/{id}/quality_tags`. |
+
+### Intentionally not changed (sixth pass)
+
+- `edge/main.py`, `cloud/main.py`, the offload path, `cloud/main.py`'s
+  `/verify/image` contract, `edge/cloud_client.py`, `edge/offload_router.py`,
+  `config/experiment_session.py`.
+- All existing CSV schemas. New artifacts live only as sidecar JSON.
+- Deployment manifests and `cloud/requirements.txt` — no new
+  dependencies (offline helpers reuse pandas / numpy; cloud uses numpy).

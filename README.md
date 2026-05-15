@@ -15,6 +15,8 @@ Telemetry-driven embedded AI pipeline: **YuNet + MobileFaceNet** on the edge, op
 | Telemetry ownership | [docs/TELEMETRY.md](docs/TELEMETRY.md) |
 | Stabilization analysis | [docs/STABILIZATION_ANALYSIS.md](docs/STABILIZATION_ANALYSIS.md) |
 | Stabilization diagnostics | [docs/STABILIZATION_DIAGNOSTICS.md](docs/STABILIZATION_DIAGNOSTICS.md) |
+| Runtime diagnostics | [docs/RUNTIME_DIAGNOSTICS.md](docs/RUNTIME_DIAGNOSTICS.md) |
+| Soft quality gates | [docs/QUALITY_GATES.md](docs/QUALITY_GATES.md) |
 | Experiment protocol metadata | [docs/EXPERIMENT_PROTOCOL.md](docs/EXPERIMENT_PROTOCOL.md) |
 | Repository layout (current vs target) | [docs/REPOSITORY_LAYOUT.md](docs/REPOSITORY_LAYOUT.md) |
 | Cross-process contracts | [shared/README.md](shared/README.md) |

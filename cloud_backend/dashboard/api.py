@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query
 from cloud_backend.analytics import (
     calibration as calibration_mod,
     metrics as metrics_mod,
+    quality as quality_mod,
     stabilization as stabilization_mod,
 )
 from cloud_backend.experiments.registry import ExperimentRegistry
@@ -343,3 +344,32 @@ async def session_category(session_id: str) -> Dict[str, Any]:
     if cat is None:
         raise HTTPException(status_code=404, detail=f"unknown session_id={session_id!r}")
     return cat
+
+
+# ── Quality tags (pass 6) ─────────────────────────────────────────────────────
+
+@router.get("/metrics/quality_tags", response_model=MetricResponse)
+async def metric_quality_tags(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = quality_mod.evaluate(events)
+    return MetricResponse(
+        metric="quality_tags",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_events"],
+        value=result,
+        detail=f"{result['tag_count']} tags raised",
+    )
+
+
+@router.get("/sessions/{session_id}/quality_tags")
+async def session_quality_tags(session_id: str) -> Dict[str, Any]:
+    storage = get_default_storage()
+    if storage.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown session_id={session_id!r}")
+    events = list(storage.iter_session_events(session_id))
+    result = quality_mod.evaluate(events)
+    return {"session_id": session_id, **result}
