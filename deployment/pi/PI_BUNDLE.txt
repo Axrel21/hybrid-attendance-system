@@ -1,0 +1,38 @@
+# PI_BUNDLE.txt — paths to ship to a Raspberry Pi edge device.
+#
+# Format: rsync --files-from manifest. One source path per line, relative
+# to the repository root. Trailing slash matters (directory vs file).
+# Lines starting with '#' or blank are ignored by rsync.
+#
+# Used by deployment/pi/deploy_pi.sh.
+#
+# Maintenance: keep this in sync with docs/DEPLOYMENT.md and edge/README.md
+# "Pi deployment bundle (goal)". Do NOT add cloud/, research/, dataset_raw/,
+# dataset_processed/, or archived experiments/exp_*/ to this list.
+
+# --- Entry point ---
+run.py
+
+# --- Edge runtime package ---
+edge/
+
+# --- Shared config (edge + research) ---
+config/
+
+# --- Cross-process contracts (HTTP + CSV schemas) ---
+shared/
+
+# --- Pi-specific assets: systemd unit, setup script, OpenCV GUI notes ---
+deployment/pi/
+
+# --- Runtime artifacts (must exist before pi_setup.sh succeeds) ---
+# The MobileFaceNet enrollment DB is gitignored; build it on a dev machine
+# via `python -m enrollment.enroll` and ship the resulting JSON.
+data/known_faces.json
+
+# --- Model weights (gitignored; place under models/ before deploying) ---
+models/yunet.onnx
+models/mobilefacenet.tflite
+
+# --- Legacy alias kept for muscle memory ---
+requirements_pi.txt

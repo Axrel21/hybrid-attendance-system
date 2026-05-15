@@ -25,9 +25,28 @@
 6. Run: `HEADLESS=1 CAMERA_BACKEND=libcamera python run.py` (adjust env per `config/settings.py` / `run.py` docstring).
 7. Optional: install `deployment/pi/attendance.service` (edit `User`, `WorkingDirectory`, `ExecStart`).
 
-### Selective copy example (rsync)
+### Selective copy (scripted)
 
-From dev machine (adjust paths):
+The second-pass stabilization adds a rsync `--files-from` manifest and a
+small wrapper that defaults to `--dry-run`:
+
+```bash
+# Preview (no copy)
+bash deployment/pi/deploy_pi.sh pi@raspberrypi:~/attendance/
+
+# Real copy
+bash deployment/pi/deploy_pi.sh --apply pi@raspberrypi:~/attendance/
+```
+
+The manifest is plain text — `deployment/pi/PI_BUNDLE.txt` — so it is
+easy to audit before any rsync runs. It includes `run.py`, `edge/`,
+`config/`, `deployment/pi/`, `data/known_faces.json`, and the two model
+files under `models/`. It **excludes** `cloud/`, `research/`,
+`dataset_raw/`, archived `experiments/`, and `data/plots/`.
+
+### Selective copy (manual)
+
+The equivalent manual rsync (kept here for reference):
 
 ```bash
 rsync -av --relative \
@@ -41,15 +60,26 @@ Add `EXPERIMENT_LABEL`, `CLOUD_SERVER_URL`, etc. via systemd `Environment=` or s
 
 ## Cloud server
 
-1. `cd cloud && python -m venv .venv && source .venv/bin/activate` (or Conda).
-2. `pip install -r requirements.txt` (GPU: `onnxruntime-gpu`; CPU: swap per README).
-3. Build `gallery/` with `enroll_gallery.py` **before** `uvicorn`.
-4. Run from **`cloud/`** working directory:
+1. From the dev machine, copy with the manifest:
+
+```bash
+bash deployment/cloud/deploy_cloud.sh user@server:~/arcface_server/   # dry-run
+bash deployment/cloud/deploy_cloud.sh --apply user@server:~/arcface_server/
+```
+
+2. On the server: `cd cloud && python -m venv .venv && source .venv/bin/activate` (or Conda).
+3. `pip install -r requirements.txt` (GPU: `onnxruntime-gpu`; CPU: swap per README).
+4. Build `gallery/` with `enroll_gallery.py` **before** `uvicorn`.
+5. Run from **`cloud/`** working directory:
 
 ```bash
 cd cloud
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+`deploy_cloud.sh` excludes `cloud/gallery/` and `cloud/.venv/` — the
+server must build its own with its enrollment images. See
+`deployment/cloud/README.md`.
 
 ## Shared config
 

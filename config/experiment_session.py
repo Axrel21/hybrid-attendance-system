@@ -185,9 +185,36 @@ def init_experiment_session(project_root: str) -> ExperimentPaths:
     )
 
     _write_settings_snapshot(settings_snapshot_path, experiment_id)
+    _append_session_index(project_root, paths)
 
     _CURRENT = paths
     os.environ["EXPERIMENT_ROOT"] = root
     os.environ["EXPERIMENT_ID"] = experiment_id
 
     return paths
+
+
+def _append_session_index(project_root: str, paths: "ExperimentPaths") -> None:
+    """Best-effort append of one JSONL row per session to experiments/index.jsonl.
+
+    Dashboard-readable enumeration of every run. Wrapped in a blanket except
+    so the pipeline never fails because of an index-write hiccup (full disk,
+    permission issue on a read-only mount, etc.). Telemetry CSVs remain the
+    authoritative per-run record; this file is a convenience index only.
+    """
+    try:
+        index_path = os.path.join(project_root, "experiments", "index.jsonl")
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        record = {
+            "experiment_id": paths.experiment_id,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "root": os.path.relpath(paths.root, project_root),
+            "telemetry_csv": os.path.relpath(paths.telemetry_csv, project_root),
+            "diagnostic_csv": os.path.relpath(paths.diagnostic_csv, project_root),
+            "attendance_csv": os.path.relpath(paths.attendance_csv, project_root),
+            "experiment_label": os.environ.get("EXPERIMENT_LABEL", ""),
+        }
+        with open(index_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except Exception:
+        pass

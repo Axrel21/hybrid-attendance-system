@@ -1,0 +1,26 @@
+# CLOUD_BUNDLE.txt — paths to ship to the ArcFace verification server.
+#
+# Used by deployment/cloud/deploy_cloud.sh. Format mirrors PI_BUNDLE.txt.
+#
+# The server runs from inside the cloud/ directory (see cloud/README.md);
+# the typical destination is ~/arcface_server/cloud/ on the server host.
+#
+# Maintenance: do NOT add edge/, config/, run.py, research/, or any Pi-only
+# deployment assets. The cloud server is fully isolated from edge runtime.
+
+# --- Server source ---
+cloud/main.py
+cloud/arcface_verifier.py
+cloud/gallery.py
+cloud/enroll_gallery.py
+cloud/requirements.txt
+cloud/README.md
+cloud/.gitignore
+
+# --- Cross-process contracts (HTTP + CSV schemas) ---
+# Lightweight; safe to ship on the server even though it imports lazily
+# from edge.* in shared/schemas (those imports only fire on demand).
+shared/
+
+# --- Legacy alias kept for muscle memory ---
+requirements_cloud.txt

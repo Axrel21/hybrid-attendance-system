@@ -64,3 +64,77 @@ python -m research.analysis.liveness_diag_print --help
 
 - Same as §5–6; `edge/experiment_report.py` unchanged in behavior.
 - Orientation launcher: `python -m experiments.run_orientation_experiment --help`
+
+## 11. Second-pass artifacts
+
+- Selective deploy dry-runs (no destination side-effects):
+
+```bash
+bash deployment/pi/deploy_pi.sh user@pi:~/attendance/
+bash deployment/cloud/deploy_cloud.sh user@server:~/arcface_server/
+```
+
+- Legacy alias still resolves to the edge stack:
+
+```bash
+pip install --dry-run -r requirments.txt   # expands to edge/requirements-edge.txt
+```
+
+- Session index appears after a short `run.py` smoke session:
+
+```bash
+ls experiments/index.jsonl
+tail -n 1 experiments/index.jsonl   # one JSON line per run
+```
+
+- Edge import smoke test still includes the new path:
+
+```bash
+python -c "from config.experiment_session import _append_session_index, init_experiment_session"
+```
+
+## 12. Third-pass artifacts
+
+- `shared/` is importable without the edge runtime stack installed:
+
+```bash
+python -c "
+import shared
+from shared import (
+    VERIFY_IMAGE_PATH, METADATA_FIELDS, VERIFICATION_RESPONSE_FIELDS,
+    ARCFACE_EMBEDDING_DIM, DEFAULT_JPEG_QUALITY, ATTENDANCE_CSV_COLUMNS,
+    EXPERIMENT_INDEX_FIELDS,
+)
+assert ARCFACE_EMBEDDING_DIM == 512
+print('shared OK')
+"
+```
+
+- Lazy CSV schema access fails cleanly when edge runtime deps are
+  missing, succeeds when they are installed:
+
+```bash
+python -c "
+from shared.schemas import get_diag_columns, get_telemetry_csv_columns
+try:
+    cols = get_diag_columns()
+    print('DIAG cols:', len(cols))
+except ImportError as exc:
+    print('expected on hosts without cv2/tflite:', exc)
+"
+```
+
+- Manifest sanity check (CI-safe, dry-runs only):
+
+```bash
+bash deployment/common/verify_manifests.sh
+```
+
+- Tarball builds:
+
+```bash
+bash deployment/common/package_pi.sh /tmp/_dist
+bash deployment/common/package_cloud.sh /tmp/_dist
+tar -tzf /tmp/_dist/attendance_pi_*.tar.gz | head
+tar -tzf /tmp/_dist/arcface_server_*.tar.gz | head
+```

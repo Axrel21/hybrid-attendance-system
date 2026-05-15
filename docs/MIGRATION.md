@@ -39,3 +39,88 @@ This document summarizes a **non-destructive** layout change focused on deployme
 - New style: `python -m research.analysis.orientation` etc.
 
 See `docs/DEPLOYMENT.md` for what to copy to the Pi vs the server.
+
+---
+
+## Second-pass operational stabilization
+
+Additive boundary clarification and deployment automation. Runtime
+semantics, telemetry schemas, and offload API are unchanged. See
+`docs/STABILIZATION_ANALYSIS.md` for the full analysis and
+`docs/refactor_change_summary.md` for the actual diff.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `deployment/pi/PI_BUNDLE.txt` | Source-of-truth manifest for Pi rsync (`--files-from`). |
+| `deployment/pi/deploy_pi.sh` | Convenience wrapper. Defaults to `--dry-run`; pass `--apply` to copy. |
+| `deployment/cloud/CLOUD_BUNDLE.txt` | Source-of-truth manifest for the ArcFace server. |
+| `deployment/cloud/deploy_cloud.sh` | Same shape as `deploy_pi.sh`. |
+| `deployment/cloud/README.md` | Server-side post-deploy runbook. |
+| `data/README.md` | Documents the runtime/research split inside `data/`. |
+| `enrollment/README.md` | Confirms `enrollment/` is dev-time-only and not part of the Pi bundle. |
+| `docs/TELEMETRY.md` | Canonical emitter / schema / destination reference. |
+| `docs/STABILIZATION_ANALYSIS.md` | This pass's operational analysis and risk inventory. |
+| `experiments/index.jsonl` | Best-effort one-line-per-session index, appended by `config/experiment_session.py`. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `requirments.txt` (typo) | Converted from a stale standalone pin set into a forwarder: `-r edge/requirements-edge.txt`. Matches `requirements_pi.txt`. |
+| `config/experiment_session.py` | Added `_append_session_index`; called from `init_experiment_session` after the settings snapshot write. Try/except wrapped so an index failure can never abort the pipeline. |
+| `README.md`, `docs/DEPLOYMENT.md`, `docs/VALIDATION.md` | Quick-link the new artifacts. |
+
+### Intentionally not changed
+
+- `edge/*` layout — first-pass rule preserved (no `edge/runtime/` split).
+- `config/` location — still at repo root.
+- `cloud/*` layout — bare imports + `cwd=cloud/` server contract unchanged.
+- DIAG / telemetry CSV schemas — unchanged.
+- `enrollment/` location — kept at root to preserve `python -m enrollment.enroll`.
+- `shared/` — still a README-only doc pointer.
+
+---
+
+## Third-pass operational separation
+
+Promotes `shared/` to a real (still dependency-light) Python package,
+introduces `deployment/common/` for cross-cutting helpers, and ships
+both bundles with `shared/`. Runtime code paths, telemetry schemas, and
+the hybrid offload wire contract are unchanged.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `shared/__init__.py` | Re-exports the stable contract names. |
+| `shared/contracts.py` | HTTP endpoint paths, multipart and metadata field names, `VerificationResponse` field tuple, embedding-dim invariants (ArcFace 512, MobileFaceNet 128 / 192), defaults (`DEFAULT_JPEG_QUALITY`, `DEFAULT_TIMEOUT_S`, `DEFAULT_CLOUD_PORT`), `CONTRACT_VERSION`. |
+| `shared/schemas.py` | Lazy `get_diag_columns()` / `get_telemetry_csv_columns()` plus verbatim `ATTENDANCE_CSV_COLUMNS` and `EXPERIMENT_INDEX_FIELDS`. |
+| `deployment/common/README.md` | Describes the three helper scripts. |
+| `deployment/common/verify_manifests.sh` | Dry-runs both bundles, fails fast if either is malformed or leaks paths. |
+| `deployment/common/package_pi.sh` | Builds `dist/attendance_pi_<utc>.tar.gz`. |
+| `deployment/common/package_cloud.sh` | Builds `dist/arcface_server_<utc>.tar.gz`. |
+| `docs/REPOSITORY_LAYOUT.md` | Maps conceptual subsystems to current homes; documents what stays stable and what can safely separate next. |
+| `docs/final_repo_separation_summary.md` | Implementation-focused diff record (see file for the full table). |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `shared/README.md` | Rewritten to describe the new contract modules. |
+| `deployment/pi/PI_BUNDLE.txt` | Adds `shared/`. |
+| `deployment/cloud/CLOUD_BUNDLE.txt` | Adds `shared/`. |
+| `README.md` | Quick-link rows for `shared/`, `deployment/common/`, `docs/REPOSITORY_LAYOUT.md`. |
+
+### Intentionally not changed (third pass)
+
+- `edge/` and `cloud/` remain at their existing paths. The hypothetical
+  `edge_runtime/` and `cloud_backend/` directories in the brief are
+  intentionally **not** created — empty placeholder packages would
+  add confusion without delivering function. Their conceptual mapping
+  to today's code is documented in `docs/REPOSITORY_LAYOUT.md`.
+- No runtime module was rewritten. `edge/cloud_client.py` and
+  `cloud/main.py` still hard-code the contract strings; future passes
+  can adopt the constants in `shared/contracts.py` once a coordinated
+  cross-component update is desired.
