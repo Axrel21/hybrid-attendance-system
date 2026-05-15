@@ -14,6 +14,8 @@ Telemetry-driven embedded AI pipeline: **YuNet + MobileFaceNet** on the edge, op
 | Selective cloud deploy | [deployment/cloud/CLOUD_BUNDLE.txt](deployment/cloud/CLOUD_BUNDLE.txt) + [deploy_cloud.sh](deployment/cloud/deploy_cloud.sh) |
 | Telemetry ownership | [docs/TELEMETRY.md](docs/TELEMETRY.md) |
 | Stabilization analysis | [docs/STABILIZATION_ANALYSIS.md](docs/STABILIZATION_ANALYSIS.md) |
+| Stabilization diagnostics | [docs/STABILIZATION_DIAGNOSTICS.md](docs/STABILIZATION_DIAGNOSTICS.md) |
+| Experiment protocol metadata | [docs/EXPERIMENT_PROTOCOL.md](docs/EXPERIMENT_PROTOCOL.md) |
 | Repository layout (current vs target) | [docs/REPOSITORY_LAYOUT.md](docs/REPOSITORY_LAYOUT.md) |
 | Cross-process contracts | [shared/README.md](shared/README.md) |
 | Composite cloud backend | [cloud_backend/README.md](cloud_backend/README.md) |

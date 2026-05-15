@@ -5,6 +5,6 @@ Currently a thin layer over :mod:`cloud_backend.storage`. Future
 extensions (cross-run aggregation, attack-type breakdowns, ROC over a
 whole label) live here.
 """
-from .registry import ExperimentRegistry
+from .registry import ExperimentRegistry, categorize_session
 
-__all__ = ["ExperimentRegistry"]
+__all__ = ["ExperimentRegistry", "categorize_session"]

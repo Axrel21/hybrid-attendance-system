@@ -103,6 +103,9 @@ route, request_id, timestamp_server_ms, gallery_size
 | Path | Writer | Reader | Purpose |
 |------|--------|--------|---------|
 | `experiments/index.jsonl` | `config.experiment_session.init_experiment_session` (second-pass) | Dashboards, future tooling | One JSON line per session: `{experiment_id, started_at, root, label, telemetry_csv, diagnostic_csv, attendance_csv}`. Best-effort; pipeline never blocks on it. |
+| `experiments/exp_<id>/config/experiment_protocol.json` | `research.experiment_protocol` CLI (fifth-pass) | `edge.telemetry_uploader.build_session_start`; cloud `/api/sessions/{id}/protocol` | Optional sidecar; structured reproducibility metadata (attack type, distance, lighting, orientation, mounting, movement, dataset label, operator, target identities, ...). See [`EXPERIMENT_PROTOCOL.md`](EXPERIMENT_PROTOCOL.md). |
+| `experiments/exp_<id>/summaries/stabilization.json` | `research.analysis.stabilization` CLI (fifth-pass) | Manual / notebooks / future dashboards | Eight-dimension stabilization summary. See [`STABILIZATION_DIAGNOSTICS.md`](STABILIZATION_DIAGNOSTICS.md). |
+| `experiments/exp_<id>/summaries/threshold_sweep.json` | `research.analysis.threshold_sweep` CLI (fifth-pass) | Manual / notebooks | Threshold what-if + hysteresis flip-flops. |
 | `data/experiment_sessions.jsonl` | `research/experiments/orientation_launcher.py` only | Manual / analysis scripts | Tagged orientation calibration sessions. Legacy; preserved for backward compatibility. |
 | `data/known_faces.json` | `enrollment/enroll.py` | `edge.main.FinalHybridEdge.__init__` | MobileFaceNet enrollment DB. Runtime artifact, gitignored. |
 | `data/plots/<topic>/` | Legacy `analyze_*` defaults | Manual | Older static plot outputs. Modern flow puts plots under `experiments/<id>/plots/`. |

@@ -196,3 +196,76 @@ print(metrics.eer(np.random.randn(200), np.random.randint(0,2,200)))
 print(get_default_storage().list_sessions())
 "
 ```
+
+## 14. Stabilization infrastructure artifacts
+
+- ExperimentProtocol round-trip:
+
+```bash
+python3 -c "
+from research.experiment_protocol import ExperimentProtocol, write_protocol, load_protocol
+import tempfile, pathlib
+with tempfile.TemporaryDirectory() as t:
+    s = pathlib.Path(t) / 'exp_001'; s.mkdir()
+    p = ExperimentProtocol(attack_type='print', distance_m=2.0,
+                           lighting='normal', orientation='frontal',
+                           mounting='tripod_eye_level', movement='static')
+    print('warnings:', p.validate())
+    write_protocol(s, p)
+    assert load_protocol(s).attack_type == 'print'
+    print('round-trip OK')
+"
+```
+
+- Annotate a real session:
+
+```bash
+python3 -m research.experiment_protocol \
+    --session experiments/exp_<id>/ \
+    --attack-type print --distance 2.0 --lighting normal \
+    --orientation frontal --mounting tripod_eye_level --movement static
+```
+
+- Offline stabilization summary:
+
+```bash
+python3 -m research.analysis.stabilization --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/stabilization.json
+```
+
+- Threshold sweep:
+
+```bash
+python3 -m research.analysis.threshold_sweep \
+    --session experiments/exp_<id>/ --steps 21
+ls experiments/exp_<id>/summaries/threshold_sweep.json
+```
+
+- Cloud-side analytics on synthetic events (no fastapi required):
+
+```bash
+python3 -c "
+from cloud_backend.analytics import stabilization, calibration
+events = [{'event_type':'diagnostic','track_id':1,'fields':{'sim':0.7,'mode_raw':'FRONTAL','lbl':'REAL','cpu_temp_c':62.0,'face_w':120,'face_h':140,'orient_ratio':0.85}}]
+print(stabilization.stabilization_summary(events))
+print(calibration.threshold_sweep(events, [0.5, 0.7, 0.9], mid_offset=0.15))
+"
+```
+
+- Categorization helper:
+
+```bash
+python3 -c "
+from cloud_backend.experiments.registry import categorize_session
+print(categorize_session({'session_id':'x','protocol':{'attack_type':'print','orientation':'frontal','lighting':'normal','distance_m':2.0}}))
+"
+```
+
+- Cloud composite endpoint check (server running):
+
+```bash
+curl -s http://localhost:8000/api/metrics/stabilization | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/metrics/threshold_sweep | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/sessions/exp_<id>/protocol | python3 -m json.tool
+curl -s http://localhost:8000/api/sessions/exp_<id>/category | python3 -m json.tool
+```

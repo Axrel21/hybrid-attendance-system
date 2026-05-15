@@ -85,6 +85,7 @@ class SessionPaths:
     root: Path
     session_id: str
     settings_snapshot: Path
+    experiment_protocol: Path
     telemetry_csv: Path
     diagnostic_csv: Path
     attendance_csv: Path
@@ -98,6 +99,7 @@ class SessionPaths:
             root=root,
             session_id=session_id,
             settings_snapshot=root / "config" / "settings_snapshot.json",
+            experiment_protocol=root / "config" / "experiment_protocol.json",
             telemetry_csv=root / "telemetry" / "telemetry_log.csv",
             diagnostic_csv=root / "diagnostics" / "diagnostic_log.csv",
             attendance_csv=root / "diagnostics" / "attendance_log.csv",
@@ -226,6 +228,17 @@ def _read_settings_snapshot(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _read_experiment_protocol(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("Failed to read %s: %s", path, exc)
+        return None
+
+
 def build_session_start(paths: SessionPaths, experiment_label: str) -> Dict[str, Any]:
     snapshot = _read_settings_snapshot(paths.settings_snapshot)
     settings_mod = snapshot.get("settings_module", {})
@@ -237,10 +250,16 @@ def build_session_start(paths: SessionPaths, experiment_label: str) -> Dict[str,
         )
     }
     environment = snapshot.get("runtime_env_overrides", {})
+    # Optional experiment-protocol sidecar — only present when the operator
+    # ran ``python -m research.experiment_protocol`` against this session.
+    protocol = _read_experiment_protocol(paths.experiment_protocol)
+    # Allow CLI --label to override an empty protocol.experiment_label.
+    if protocol and experiment_label and not protocol.get("experiment_label"):
+        protocol["experiment_label"] = experiment_label
     return {
         "session_id": paths.session_id,
         "started_at": _started_at_from_session_id(paths.session_id),
-        "experiment_label": experiment_label,
+        "experiment_label": experiment_label or (protocol or {}).get("experiment_label", ""),
         "device_id": os.environ.get("DEVICE_ID") or socket.gethostname(),
         "hostname": socket.gethostname(),
         "camera_backend": settings_mod.get("CAMERA_BACKEND"),
@@ -253,6 +272,7 @@ def build_session_start(paths: SessionPaths, experiment_label: str) -> Dict[str,
         },
         "environment": environment,
         "notes": os.environ.get("UPLOADER_NOTES"),
+        "protocol": protocol,
     }
 
 

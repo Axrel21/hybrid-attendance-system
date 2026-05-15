@@ -20,7 +20,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from cloud_backend.analytics import metrics as metrics_mod
+from cloud_backend.analytics import (
+    calibration as calibration_mod,
+    metrics as metrics_mod,
+    stabilization as stabilization_mod,
+)
 from cloud_backend.experiments.registry import ExperimentRegistry
 from cloud_backend.schemas import (
     ExperimentListResponse,
@@ -205,3 +209,137 @@ async def metric_latency(
         value=result,
         detail=f"percentiles over event_field '{key}'",
     )
+
+
+# ── Stabilization / experimentation (pass 5 additions) ────────────────────────
+
+@router.get("/metrics/stabilization", response_model=MetricResponse)
+async def metric_stabilization(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = stabilization_mod.stabilization_summary(events)
+    return MetricResponse(
+        metric="stabilization_summary",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_events"],
+        value=result,
+        detail="orientation + confidence + PAD + thermal + bbox bundle",
+    )
+
+
+@router.get("/metrics/orientation", response_model=MetricResponse)
+async def metric_orientation(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = stabilization_mod.orientation_stability(events)
+    return MetricResponse(
+        metric="orientation_stability",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_tracks"],
+        value=result,
+    )
+
+
+@router.get("/metrics/pad", response_model=MetricResponse)
+async def metric_pad(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = stabilization_mod.pad_temporal(events)
+    return MetricResponse(
+        metric="pad_temporal",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n"],
+        value=result,
+    )
+
+
+@router.get("/metrics/thermal", response_model=MetricResponse)
+async def metric_thermal(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+    threshold_c: float = Query(default=75.0),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = stabilization_mod.thermal_stats(events, threshold_c=threshold_c)
+    return MetricResponse(
+        metric="thermal",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n"],
+        value=result,
+        detail=f"threshold_c={threshold_c}",
+    )
+
+
+@router.get("/metrics/threshold_sweep", response_model=MetricResponse)
+async def metric_threshold_sweep(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+    th_high_min: float = Query(default=0.50),
+    th_high_max: float = Query(default=0.95),
+    steps: int = Query(default=19, ge=2, le=200),
+    mid_offset: float = Query(default=0.15),
+) -> MetricResponse:
+    import numpy as np
+    events = _collect_events(session_id, experiment_label)
+    th_values = np.linspace(th_high_min, th_high_max, steps)
+    result = calibration_mod.threshold_sweep(
+        events, th_values.tolist(), mid_offset=mid_offset,
+    )
+    return MetricResponse(
+        metric="threshold_sweep",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_events"],
+        value=result,
+        detail=f"th_high in [{th_high_min}, {th_high_max}] x {steps} steps",
+    )
+
+
+@router.get("/metrics/confidence_distribution", response_model=MetricResponse)
+async def metric_confidence_distribution(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+    key: str = Query(default="sim"),
+    bins: int = Query(default=20, ge=2, le=200),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = calibration_mod.confidence_distribution(events, key=key, bins=bins)
+    return MetricResponse(
+        metric=f"confidence_distribution:{key}",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n"],
+        value=result,
+    )
+
+
+@router.get("/sessions/{session_id}/protocol")
+async def session_protocol(session_id: str) -> Dict[str, Any]:
+    registry = ExperimentRegistry(get_default_storage())
+    protocol = registry.session_protocol(session_id)
+    if protocol is None:
+        # Distinguish "session unknown" from "session present but no protocol".
+        if get_default_storage().get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown session_id={session_id!r}")
+        return {"session_id": session_id, "protocol": None,
+                "detail": "session has no experiment_protocol.json sidecar"}
+    return {"session_id": session_id, "protocol": protocol}
+
+
+@router.get("/sessions/{session_id}/category")
+async def session_category(session_id: str) -> Dict[str, Any]:
+    registry = ExperimentRegistry(get_default_storage())
+    cat = registry.session_category(session_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail=f"unknown session_id={session_id!r}")
+    return cat

@@ -126,6 +126,94 @@ TELEMETRY_EVENT_TYPES: Tuple[str, ...] = (
     "report",               # post-run experiment report summary
 )
 
+# ── Stabilization / experimentation endpoints (cloud_backend) ─────────────────
+METRICS_STABILIZATION_PATH: Final[str] = "/api/metrics/stabilization"
+METRICS_ORIENTATION_PATH: Final[str] = "/api/metrics/orientation"
+METRICS_PAD_PATH: Final[str] = "/api/metrics/pad"
+METRICS_THERMAL_PATH: Final[str] = "/api/metrics/thermal"
+METRICS_THRESHOLD_SWEEP_PATH: Final[str] = "/api/metrics/threshold_sweep"
+METRICS_CONFIDENCE_DISTRIBUTION_PATH: Final[str] = "/api/metrics/confidence_distribution"
+SESSION_PROTOCOL_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/protocol"
+SESSION_CATEGORY_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/category"
+
+# ── Experiment protocol vocabulary ────────────────────────────────────────────
+# Free-text tags carried in experiment_protocol.json. Documented vocabulary so
+# dashboards / analysis tools can offer consistent UI; "other" / arbitrary
+# values are still accepted at the wire level.
+EXPERIMENT_PROTOCOL_VERSION: Final[str] = "1.0"
+
+ATTACK_TYPES: Tuple[str, ...] = (
+    "none",
+    "print",
+    "screen_replay",
+    "video_replay",
+    "mask_paper",
+    "mask_silicone",
+    "mask_resin",
+    "deepfake",
+    "occlusion",
+    "other",
+)
+
+LIGHTING_LABELS: Tuple[str, ...] = (
+    "bright",
+    "normal",
+    "dim",
+    "backlit",
+    "side_lit",
+    "uneven",
+    "outdoor_sunny",
+    "outdoor_cloudy",
+)
+
+ORIENTATION_LABELS: Tuple[str, ...] = (
+    "frontal",
+    "tilted",
+    "overhead",
+    "side",
+    "mixed",
+)
+
+MOUNTING_LABELS: Tuple[str, ...] = (
+    "tripod_eye_level",
+    "tripod_overhead",
+    "wall_mount",
+    "ceiling_mount",
+    "desk_clip",
+    "handheld",
+    "other",
+)
+
+MOVEMENT_LABELS: Tuple[str, ...] = (
+    "static",
+    "slow_walk",
+    "fast_walk",
+    "approach",
+    "retreat",
+    "lateral",
+    "rotation",
+    "mixed",
+)
+
+# ── Stabilization metric keys (vocab for /api/metrics/stabilization) ──────────
+STABILIZATION_METRIC_KEYS: Tuple[str, ...] = (
+    "orientation_mode_flip_rate",
+    "orientation_ratio_std",
+    "confidence_rolling_std",
+    "confidence_drift",
+    "detection_persistence_mean",
+    "bbox_centroid_std",
+    "bbox_area_cv",
+    "blur_mean",
+    "blur_std",
+    "pad_real_fraction",
+    "pad_spoof_fraction",
+    "pad_uncertain_fraction",
+    "offload_trigger_rate",
+    "thermal_p95_c",
+    "thermal_throttle_warnings",
+)
+
 
 def is_valid_arcface_dim(dim: int) -> bool:
     """Gallery / wire-format guard for the cloud side."""
@@ -175,6 +263,21 @@ __all__ = [
     "DEFAULT_TELEMETRY_RETRY_BACKOFF_S",
     "DEFAULT_TELEMETRY_MAX_RETRIES",
     "TELEMETRY_EVENT_TYPES",
+    "METRICS_STABILIZATION_PATH",
+    "METRICS_ORIENTATION_PATH",
+    "METRICS_PAD_PATH",
+    "METRICS_THERMAL_PATH",
+    "METRICS_THRESHOLD_SWEEP_PATH",
+    "METRICS_CONFIDENCE_DISTRIBUTION_PATH",
+    "SESSION_PROTOCOL_PATH_TEMPLATE",
+    "SESSION_CATEGORY_PATH_TEMPLATE",
+    "EXPERIMENT_PROTOCOL_VERSION",
+    "ATTACK_TYPES",
+    "LIGHTING_LABELS",
+    "ORIENTATION_LABELS",
+    "MOUNTING_LABELS",
+    "MOVEMENT_LABELS",
+    "STABILIZATION_METRIC_KEYS",
     "is_valid_arcface_dim",
     "is_valid_mobilefacenet_dim",
 ]

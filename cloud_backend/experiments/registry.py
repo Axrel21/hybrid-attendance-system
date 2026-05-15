@@ -4,6 +4,10 @@
 Backed entirely by :class:`cloud_backend.storage.TelemetryStorage`. No
 duplication of state; if the on-disk store is wiped, the registry returns
 empty results next call.
+
+Adds in pass 5: :func:`categorize_session`, which derives a canonical
+short key + dimension class from the (optional) experiment-protocol
+sub-dict in session metadata.
 """
 from __future__ import annotations
 
@@ -14,6 +18,50 @@ from typing import Any, Dict, List, Optional
 from cloud_backend.storage import SessionRecord, TelemetryStorage
 
 log = logging.getLogger("cloud_backend.experiments")
+
+
+# ── Auto-categorization ──────────────────────────────────────────────────────
+
+def _distance_bucket(distance_m: Optional[float]) -> str:
+    if distance_m is None:
+        return "unknown"
+    try:
+        d = float(distance_m)
+    except (TypeError, ValueError):
+        return "unknown"
+    if d <= 0:
+        return "unknown"
+    if d < 1.0:
+        return "close"
+    if d < 2.5:
+        return "mid"
+    return "far"
+
+
+def categorize_session(metadata: Dict[str, Any]) -> Dict[str, str]:
+    """Derive a short canonical category key from session metadata.
+
+    Reads the optional ``protocol`` sub-dict (populated by the edge
+    uploader from ``experiments/exp_<id>/config/experiment_protocol.json``).
+    Returns a stable dict so dashboards can group sessions without
+    re-parsing free-text fields.
+    """
+    protocol = (metadata or {}).get("protocol") or {}
+    attack_type = (protocol.get("attack_type") or "unknown").strip().lower()
+    attack_class = "genuine" if attack_type in ("", "none") else attack_type
+    orientation = (protocol.get("orientation") or "unknown").strip().lower()
+    lighting = (protocol.get("lighting") or "unknown").strip().lower()
+    distance = protocol.get("distance_m")
+    dbucket = _distance_bucket(distance)
+    category = f"{orientation}_{attack_class}_{lighting}_{dbucket}"
+    return {
+        "session_id": metadata.get("session_id") or "",
+        "category": category,
+        "attack_class": attack_class,
+        "orientation_class": orientation,
+        "lighting_class": lighting,
+        "distance_bucket": dbucket,
+    }
 
 
 class ExperimentRegistry:
@@ -37,6 +85,19 @@ class ExperimentRegistry:
                 "last_seen": max(ends) if ends else None,
             })
         return out
+
+    def session_protocol(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the ``protocol`` sub-dict of session metadata, if any."""
+        detail = self.storage.get_session(session_id)
+        if detail is None:
+            return None
+        return (detail.get("metadata") or {}).get("protocol")
+
+    def session_category(self, session_id: str) -> Optional[Dict[str, str]]:
+        detail = self.storage.get_session(session_id)
+        if detail is None:
+            return None
+        return categorize_session(detail.get("metadata") or {})
 
     def experiment_summary(self, experiment_label: str) -> Optional[Dict[str, Any]]:
         recs = [

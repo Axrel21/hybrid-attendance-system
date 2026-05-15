@@ -128,6 +128,39 @@ SESSION_SUMMARY_FIELDS: Tuple[str, ...] = (
 )
 
 
+# Experiment protocol sidecar (experiments/exp_<id>/config/experiment_protocol.json).
+# All fields optional except ``protocol_version``. Free-text values are
+# accepted; controlled vocabularies live in :mod:`shared.contracts`
+# (``ATTACK_TYPES`` etc.) for UI consistency.
+EXPERIMENT_PROTOCOL_FIELDS: Tuple[str, ...] = (
+    "protocol_version",
+    "session_id",
+    "experiment_label",
+    "attack_type",            # member of ATTACK_TYPES
+    "distance_m",             # numeric, meters
+    "lighting",               # member of LIGHTING_LABELS
+    "orientation",            # member of ORIENTATION_LABELS
+    "mounting",               # member of MOUNTING_LABELS
+    "movement",               # member of MOVEMENT_LABELS
+    "dataset_label",          # free-text identifier
+    "operator",               # who ran the session
+    "target_identities",      # list of expected identities (for FAR/FRR labeling)
+    "environment",            # indoor/outdoor, room, etc.
+    "notes",                  # free-text
+    "recorded_at",            # ISO timestamp when the protocol was committed
+)
+
+# Categorization key shape — produced by ExperimentRegistry.categorize_session.
+SESSION_CATEGORY_FIELDS: Tuple[str, ...] = (
+    "session_id",
+    "category",               # canonical short key, e.g. "frontal_print_normal_2m"
+    "attack_class",           # "genuine" or attack_type from ATTACK_TYPES
+    "orientation_class",      # member of ORIENTATION_LABELS
+    "lighting_class",         # member of LIGHTING_LABELS
+    "distance_bucket",        # "close" (<1m) / "mid" (1-2.5m) / "far" (>2.5m)
+)
+
+
 __all__ = [
     "get_diag_columns",
     "get_telemetry_csv_columns",
@@ -136,4 +169,6 @@ __all__ = [
     "SESSION_METADATA_FIELDS",
     "TELEMETRY_EVENT_FIELDS",
     "SESSION_SUMMARY_FIELDS",
+    "EXPERIMENT_PROTOCOL_FIELDS",
+    "SESSION_CATEGORY_FIELDS",
 ]

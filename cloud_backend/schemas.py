@@ -30,6 +30,9 @@ class SessionStartRequest(BaseModel):
     hardware: Optional[Dict[str, Any]] = None
     environment: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
+    # Experiment-protocol sidecar (research/experiment_protocol.py). Optional;
+    # older edge clients omit it. Forward-compatible.
+    protocol: Optional[Dict[str, Any]] = None
 
 
 class SessionEndRequest(BaseModel):

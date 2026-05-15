@@ -165,3 +165,52 @@ record.
 - Existing CSV schemas and `VerificationResponse` shape.
 - No new dependencies in `cloud/requirements.txt`: `uvicorn[standard]`
   already provides `websockets`.
+
+---
+
+## Fifth-pass stabilization & experimentation hardening
+
+Adds observability-before-optimization infrastructure: experiment
+protocol sidecar, offline stabilization diagnostics, threshold-sweep
+tooling, cloud-side stabilization / calibration analytics, and six new
+dashboard read endpoints. Edge runtime, deployment topology, and CSV
+schemas are unchanged. See
+`docs/stabilization_infrastructure_phase_summary.md` for the full diff
+record.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `research/experiment_protocol.py` | `ExperimentProtocol` dataclass + CLI; writes `experiments/exp_<id>/config/experiment_protocol.json`. |
+| `research/analysis/stabilization.py` | Eight-dimension offline summary from `diagnostic_log.csv`. |
+| `research/analysis/threshold_sweep.py` | Threshold what-if + hysteresis flip-flop counter. |
+| `cloud_backend/analytics/stabilization.py` | Cloud-side orientation / confidence / PAD / thermal / bbox metrics over the event stream. |
+| `cloud_backend/analytics/calibration.py` | Cloud-side threshold sweep + hysteresis count + confidence distribution. |
+| `docs/EXPERIMENT_PROTOCOL.md` | Schema + lifecycle + CLI examples for the protocol sidecar. |
+| `docs/STABILIZATION_DIAGNOSTICS.md` | Offline + cloud diagnostic surface reference. |
+| `docs/stabilization_infrastructure_phase_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `shared/contracts.py` | Six metric path constants, two session-scoped path templates, `EXPERIMENT_PROTOCOL_VERSION`, controlled vocabularies (`ATTACK_TYPES`, `LIGHTING_LABELS`, `ORIENTATION_LABELS`, `MOUNTING_LABELS`, `MOVEMENT_LABELS`), `STABILIZATION_METRIC_KEYS`. |
+| `shared/schemas.py` | `EXPERIMENT_PROTOCOL_FIELDS`, `SESSION_CATEGORY_FIELDS`. |
+| `shared/__init__.py` | Re-exports the new names. |
+| `cloud_backend/analytics/__init__.py` | Wires `stabilization` and `calibration` submodules into the public namespace. |
+| `cloud_backend/schemas.py` | `SessionStartRequest.protocol: Dict | None` (optional, backward-compatible). |
+| `cloud_backend/experiments/registry.py` | `categorize_session()`, `session_protocol()`, `session_category()`. |
+| `cloud_backend/experiments/__init__.py` | Re-exports `categorize_session`. |
+| `cloud_backend/dashboard/api.py` | Six metric endpoints + protocol / category routes. |
+| `edge/telemetry_uploader.py` | `SessionPaths.experiment_protocol`; `build_session_start` reads the sidecar. |
+
+### Intentionally not changed (fifth pass)
+
+- All existing CSV schemas (`DIAG_COLUMNS`, `TELEMETRY_CSV_COLUMNS`,
+  `attendance_log` header) — touching them would force schema rotation
+  on every edge node.
+- `edge/main.py`, `cloud/main.py`, the offload path, deployment
+  manifests, and `cloud/requirements.txt`.
+- No new dependencies. The offline analyzers reuse the pinned `pandas` /
+  `numpy` on the edge; cloud analytics use `numpy` (already pinned).
