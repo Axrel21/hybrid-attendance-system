@@ -15,6 +15,6 @@ Three submodules:
 Kept dependency-light (``numpy`` required; ``pandas`` not imported) so
 the dashboard router can call them synchronously without a worker pool.
 """
-from . import calibration, metrics, quality, stabilization
+from . import calibration, evaluation, metrics, quality, stabilization
 
-__all__ = ["calibration", "metrics", "quality", "stabilization"]
+__all__ = ["calibration", "evaluation", "metrics", "quality", "stabilization"]

@@ -271,6 +271,55 @@ QUALITY_GATE_DEFAULTS: Dict[str, float] = {
 METRICS_QUALITY_TAGS_PATH: Final[str] = "/api/metrics/quality_tags"
 SESSION_QUALITY_TAGS_PATH_TEMPLATE: Final[str] = "/api/sessions/{session_id}/quality_tags"
 
+# ── Calibration + evaluation endpoints (cloud_backend, pass 7) ────────────────
+AGGREGATE_SESSIONS_PATH: Final[str] = "/api/aggregate/sessions"
+COMPARE_SESSIONS_PATH: Final[str] = "/api/compare/sessions"
+EXPERIMENT_AGGREGATE_PATH_TEMPLATE: Final[str] = "/api/experiments/{experiment_label}/aggregate"
+EVALUATION_PAD_PATH: Final[str] = "/api/evaluation/pad"
+EVALUATION_ORIENTATION_PATH: Final[str] = "/api/evaluation/orientation"
+EVALUATION_THERMAL_PATH: Final[str] = "/api/evaluation/thermal"
+EVALUATION_OFFLOAD_EFFICIENCY_PATH: Final[str] = "/api/evaluation/offload_efficiency"
+EVALUATION_LATENCY_PATH: Final[str] = "/api/evaluation/latency"
+
+# ── Experiment preset vocabulary (research/experiments/presets/*.json) ────────
+PRESET_NAMES: Tuple[str, ...] = (
+    "threshold_sweep",
+    "orientation_sweep",
+    "distance_sweep",
+    "lighting_sweep",
+    "pad_attack_sweep",
+    "hybrid_routing_sweep",
+)
+
+PRESET_VERSION: Final[str] = "1.0"
+
+# ── Evaluation metric keys (vocab for /api/evaluation/*) ──────────────────────
+EVALUATION_METRIC_KEYS: Tuple[str, ...] = (
+    "pad_confusion_matrix",
+    "pad_true_positive_rate",
+    "pad_false_positive_rate",
+    "orientation_robustness_score",
+    "orientation_per_mode_sim_mean",
+    "thermal_fps_correlation",
+    "thermal_over_threshold_rate",
+    "offload_efficiency_rate",      # cloud_outcome == "success" / offload_total
+    "offload_agreement_rate",       # edge_cloud_agree fraction
+    "latency_p95_ms",
+)
+
+# ── Stability score weights (research.analysis.stability_score defaults) ──────
+# Composite 0..1 score; higher = more stable. Each weight applies to a
+# normalised signal. Overridable in the function call.
+STABILITY_SCORE_WEIGHTS: Dict[str, float] = {
+    "active_fraction": 0.25,        # higher is better
+    "mode_flip_rate_inv": 0.15,     # 1 - mode flip rate
+    "sim_std_inv": 0.20,            # lower std -> higher score
+    "pad_flip_rate_inv": 0.15,      # 1 - PAD flip rate
+    "identity_distinct_inv": 0.10,  # 1 / max(1, distinct)
+    "thermal_safe_rate": 0.05,      # 1 - over-threshold fraction
+    "offload_success_rate": 0.10,   # success / max(1, offload_total)
+}
+
 
 def is_valid_arcface_dim(dim: int) -> bool:
     """Gallery / wire-format guard for the cloud side."""
@@ -340,6 +389,18 @@ __all__ = [
     "QUALITY_GATE_DEFAULTS",
     "METRICS_QUALITY_TAGS_PATH",
     "SESSION_QUALITY_TAGS_PATH_TEMPLATE",
+    "AGGREGATE_SESSIONS_PATH",
+    "COMPARE_SESSIONS_PATH",
+    "EXPERIMENT_AGGREGATE_PATH_TEMPLATE",
+    "EVALUATION_PAD_PATH",
+    "EVALUATION_ORIENTATION_PATH",
+    "EVALUATION_THERMAL_PATH",
+    "EVALUATION_OFFLOAD_EFFICIENCY_PATH",
+    "EVALUATION_LATENCY_PATH",
+    "PRESET_NAMES",
+    "PRESET_VERSION",
+    "EVALUATION_METRIC_KEYS",
+    "STABILITY_SCORE_WEIGHTS",
     "is_valid_arcface_dim",
     "is_valid_mobilefacenet_dim",
 ]

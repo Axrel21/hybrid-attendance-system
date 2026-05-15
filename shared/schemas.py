@@ -171,6 +171,43 @@ QUALITY_TAG_FIELDS: Tuple[str, ...] = (
     "detail",                 # short human-readable explanation
 )
 
+# Preset descriptor shape (research/experiments/presets/<name>.json).
+PRESET_FIELDS: Tuple[str, ...] = (
+    "preset",                  # member of PRESET_NAMES
+    "preset_version",
+    "description",
+    "sweep_dimension",         # e.g. "distance_m", "orientation", "lighting"
+    "sweep_values",            # list[Any]
+    "recommended_duration_s",  # per-run recommended capture duration
+    "fixed_protocol",          # nested dict — non-swept protocol fields
+    "fixed_env",               # nested dict — env vars to set per run (e.g. CLOUD_ROUTING)
+    "analysis_pipeline",       # list of analyzer module short names
+    "comparison_metric",       # dotted path into the per-session summary
+    "notes",                   # operator hints
+)
+
+# Comparison-row shape — one row per (metric, session_a, session_b) emitted by
+# research.analysis.session_comparison and the /api/compare/sessions endpoint.
+COMPARISON_FIELDS: Tuple[str, ...] = (
+    "metric",                  # canonical key (e.g. "sim_mean", "offload_rate")
+    "session_a",
+    "session_b",
+    "value_a",
+    "value_b",
+    "delta",                   # value_b - value_a (or null if non-numeric)
+    "rel_change",              # delta / max(|value_a|, eps) when numeric
+    "detail",                  # short explanation / unit
+)
+
+# Stability-score row shape — single 0..1 composite per session, plus the
+# per-signal contributions so the operator can see "why" the score is what it is.
+STABILITY_SCORE_FIELDS: Tuple[str, ...] = (
+    "session_id",
+    "score",                   # 0..1 composite, higher = more stable
+    "components",              # nested dict: signal name → contribution
+    "missing_signals",         # list of signals that weren't computable
+)
+
 
 __all__ = [
     "get_diag_columns",
@@ -183,4 +220,7 @@ __all__ = [
     "EXPERIMENT_PROTOCOL_FIELDS",
     "SESSION_CATEGORY_FIELDS",
     "QUALITY_TAG_FIELDS",
+    "PRESET_FIELDS",
+    "COMPARISON_FIELDS",
+    "STABILITY_SCORE_FIELDS",
 ]

@@ -1,0 +1,27 @@
+{
+  "preset": "hybrid_routing_sweep",
+  "preset_version": "1.0",
+  "description": "Multiple captures across CLOUD_ROUTING strategies: threshold (static), hysteresis (band), adaptive (sliding-window). Identical protocol; only the env var changes between runs.",
+  "sweep_dimension": "CLOUD_ROUTING",
+  "sweep_values": ["threshold", "hysteresis", "adaptive"],
+  "recommended_duration_s": 180,
+  "fixed_protocol": {
+    "attack_type": "none",
+    "distance_m": 2.0,
+    "lighting": "normal",
+    "orientation": "frontal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {
+    "CLOUD_ROUTING": "<sweep_value>",
+    "CLOUD_THRESHOLD": "0.65"
+  },
+  "analysis_pipeline": [
+    "stabilization",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "stabilization.offload_trigger.offload_trigger_rate",
+  "notes": "Export CLOUD_ROUTING per run before launching run.py. The aggregator joins sessions by environment.CLOUD_ROUTING and reports offload rate + edge_cloud agreement + cloud RTT per strategy."
+}

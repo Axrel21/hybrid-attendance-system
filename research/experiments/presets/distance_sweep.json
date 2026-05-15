@@ -1,0 +1,23 @@
+{
+  "preset": "distance_sweep",
+  "preset_version": "1.0",
+  "description": "Multiple captures across standing distances from 0.5m to 3.0m in 0.5m steps. Subject stands at each marked distance for the full per-run duration.",
+  "sweep_dimension": "distance_m",
+  "sweep_values": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+  "recommended_duration_s": 60,
+  "fixed_protocol": {
+    "attack_type": "none",
+    "lighting": "normal",
+    "orientation": "frontal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {},
+  "analysis_pipeline": [
+    "stabilization",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "runtime_diagnostics.distance_vs_confidence.per_bin[].sim_mean",
+  "notes": "Mark floor tape at each sweep_value before starting. Tag each session with --distance matching the sweep_value. The aggregator joins sessions by protocol.distance_m bucket and reports recognition quality as a function of range."
+}

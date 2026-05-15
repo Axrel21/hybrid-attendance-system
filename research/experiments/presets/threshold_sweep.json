@@ -1,0 +1,24 @@
+{
+  "preset": "threshold_sweep",
+  "preset_version": "1.0",
+  "description": "Single long capture under stable conditions; post-hoc sweep of MATCH_HIGH_BASE / MATCH_MID_BASE via offline threshold_sweep tool. No protocol variation between runs — exactly one capture.",
+  "sweep_dimension": "th_high",
+  "sweep_values": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90],
+  "recommended_duration_s": 300,
+  "fixed_protocol": {
+    "attack_type": "none",
+    "lighting": "normal",
+    "orientation": "frontal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {},
+  "analysis_pipeline": [
+    "stabilization",
+    "threshold_sweep",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "threshold_sweep.match_threshold_sweep[].matched_rate",
+  "notes": "Capture 5+ minutes of stable enrolled subjects. Use stabilization_report to inspect the resulting matched_rate vs th_high curve and pick a calibration point. Re-run the same session with adjusted CLOUD_THRESHOLD env var if the offload band needs tuning."
+}

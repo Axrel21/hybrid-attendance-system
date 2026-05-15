@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from cloud_backend.analytics import (
     calibration as calibration_mod,
+    evaluation as evaluation_mod,
     metrics as metrics_mod,
     quality as quality_mod,
     stabilization as stabilization_mod,
@@ -373,3 +374,169 @@ async def session_quality_tags(session_id: str) -> Dict[str, Any]:
     events = list(storage.iter_session_events(session_id))
     result = quality_mod.evaluate(events)
     return {"session_id": session_id, **result}
+
+
+# ── Aggregation + comparison (pass 7) ─────────────────────────────────────────
+
+def _per_session_metric_row(session_id: str) -> Dict[str, Any]:
+    storage = get_default_storage()
+    detail = storage.get_session(session_id)
+    if detail is None:
+        return {"session_id": session_id, "error": "unknown session"}
+    events = list(storage.iter_session_events(session_id))
+    stab = stabilization_mod.stabilization_summary(events)
+    qual = quality_mod.evaluate(events)
+    registry = ExperimentRegistry(storage)
+    return {
+        "session_id": session_id,
+        "experiment_label": (detail.get("metadata") or {}).get("experiment_label"),
+        "category": registry.session_category(session_id),
+        "event_count": detail.get("event_count", 0),
+        "stabilization": stab,
+        "quality_tags": qual,
+    }
+
+
+@router.get("/aggregate/sessions")
+async def aggregate_sessions_route(
+    ids: List[str] = Query(..., description="repeat ?ids=... per session"),
+) -> Dict[str, Any]:
+    if not ids:
+        raise HTTPException(status_code=422, detail="at least one session id required")
+    rows = [_per_session_metric_row(sid) for sid in ids]
+    return {"session_count": len(rows), "rows": rows}
+
+
+@router.get("/compare/sessions")
+async def compare_sessions_route(
+    baseline: str = Query(..., description="baseline session id"),
+    modified: str = Query(..., description="modified session id"),
+) -> Dict[str, Any]:
+    storage = get_default_storage()
+    for sid in (baseline, modified):
+        if storage.get_session(sid) is None:
+            raise HTTPException(status_code=404, detail=f"unknown session_id={sid!r}")
+    a = _per_session_metric_row(baseline)
+    b = _per_session_metric_row(modified)
+    diff_keys = [
+        ("event_count", "event_count"),
+        ("offload_trigger_rate", "stabilization.offload.outcome.offload_rate"),
+        ("orientation_mode_flip_rate_mean", "stabilization.orientation.mode_flip_rate_mean"),
+        ("thermal_p95", "stabilization.thermal.p95"),
+        ("tag_count", "quality_tags.tag_count"),
+    ]
+
+    def _walk(d: Dict[str, Any], path: str) -> Any:
+        cur: Any = d
+        for part in path.split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            else:
+                return None
+            if cur is None:
+                return None
+        return cur
+
+    rows: List[Dict[str, Any]] = []
+    for label, path in diff_keys:
+        va = _walk(a, path)
+        vb = _walk(b, path)
+        delta = (vb - va) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
+        rows.append({"metric": label, "value_a": va, "value_b": vb, "delta": delta})
+    return {"session_a": baseline, "session_b": modified, "rows": rows}
+
+
+@router.get("/experiments/{experiment_label}/aggregate")
+async def experiment_aggregate_route(experiment_label: str) -> Dict[str, Any]:
+    storage = get_default_storage()
+    recs = [r for r in storage.list_sessions() if r.experiment_label == experiment_label]
+    if not recs:
+        raise HTTPException(status_code=404, detail=f"no sessions for experiment_label={experiment_label!r}")
+    rows = [_per_session_metric_row(r.session_id) for r in recs]
+    return {"experiment_label": experiment_label, "session_count": len(rows), "rows": rows}
+
+
+# ── Evaluation wrappers (pass 7) ──────────────────────────────────────────────
+
+@router.get("/evaluation/pad", response_model=MetricResponse)
+async def evaluation_pad(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+    attack_type: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = evaluation_mod.pad_confusion_matrix(events, attack_type=attack_type)
+    return MetricResponse(
+        metric="pad_confusion_matrix",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n"],
+        value=result,
+    )
+
+
+@router.get("/evaluation/orientation", response_model=MetricResponse)
+async def evaluation_orientation(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = evaluation_mod.orientation_robustness(events)
+    return MetricResponse(
+        metric="orientation_robustness",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_modes"],
+        value=result,
+    )
+
+
+@router.get("/evaluation/thermal", response_model=MetricResponse)
+async def evaluation_thermal(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+    threshold_c: float = Query(default=75.0),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = evaluation_mod.thermal_performance_tradeoff(events, threshold_c=threshold_c)
+    return MetricResponse(
+        metric="thermal_performance_tradeoff",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n"],
+        value=result,
+    )
+
+
+@router.get("/evaluation/offload_efficiency", response_model=MetricResponse)
+async def evaluation_offload_efficiency(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = evaluation_mod.offload_efficiency(events)
+    return MetricResponse(
+        metric="offload_efficiency",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=result["n_offloads"],
+        value=result,
+    )
+
+
+@router.get("/evaluation/latency", response_model=MetricResponse)
+async def evaluation_latency(
+    session_id: Optional[str] = Query(default=None),
+    experiment_label: Optional[str] = Query(default=None),
+) -> MetricResponse:
+    events = _collect_events(session_id, experiment_label)
+    result = evaluation_mod.latency_distribution_comparison(events)
+    rows = result.get("rows") or []
+    sample = sum((r.get("n") or 0) for r in rows)
+    return MetricResponse(
+        metric="latency_distribution_comparison",
+        session_id=session_id,
+        experiment_label=experiment_label,
+        sample_count=sample,
+        value=result,
+    )

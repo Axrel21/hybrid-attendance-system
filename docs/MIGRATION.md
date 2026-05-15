@@ -257,3 +257,46 @@ record.
 - All existing CSV schemas. New artifacts live only as sidecar JSON.
 - Deployment manifests and `cloud/requirements.txt` — no new
   dependencies (offline helpers reuse pandas / numpy; cloud uses numpy).
+
+---
+
+## Seventh-pass calibration & stabilization framework
+
+Phase shift from infrastructure to methodology. Six experiment presets,
+a sweep orchestrator, multi-session aggregator, pairwise comparison,
+stability score, calibration helpers, and cloud-side evaluation
+wrappers. CSV schemas / runtime code / deployment topology unchanged.
+See `docs/calibration_and_stabilization_framework_summary.md`.
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `research/experiments/presets/{threshold,orientation,distance,lighting,pad_attack,hybrid_routing}_sweep.json` | Six named sweep templates. |
+| `research/experiments/sweep_orchestrator.py` | Preset loader + per-run plan + post-capture aggregation driver. |
+| `research/analysis/session_aggregator.py` | Multi-session metric table + Markdown. |
+| `research/analysis/session_comparison.py` | Pairwise baseline-vs-modified diff. |
+| `research/analysis/stability_score.py` | Weighted 0..1 composite from existing summaries. |
+| `research/analysis/calibration.py` | Threshold / hysteresis / routing / PAD calibration helpers. |
+| `cloud_backend/analytics/evaluation.py` | PAD confusion, orientation robustness, thermal × FPS, offload efficiency, latency comparison. |
+| `docs/EXPERIMENT_PRESETS.md` | Preset catalogue + workflow. |
+| `docs/calibration_and_stabilization_framework_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `shared/contracts.py` | `PRESET_NAMES`, `PRESET_VERSION`, `EVALUATION_METRIC_KEYS`, `STABILITY_SCORE_WEIGHTS`, eight new endpoint paths. |
+| `shared/schemas.py` | `PRESET_FIELDS`, `COMPARISON_FIELDS`, `STABILITY_SCORE_FIELDS`. |
+| `shared/__init__.py` | Re-exports. |
+| `cloud_backend/analytics/__init__.py` | Wires `evaluation` submodule. |
+| `cloud_backend/dashboard/api.py` | Eight new endpoints: aggregate, compare, experiment-aggregate, plus five evaluation routes. |
+
+### Intentionally not changed (seventh pass)
+
+- Edge runtime, cloud verification, offload path, deployment manifests,
+  `cloud/requirements.txt`.
+- All existing CSV schemas. New artifacts live only as sidecar JSON or
+  in `cloud_storage/`.
+- No new dependencies; offline tooling reuses pandas + numpy, cloud
+  uses numpy.

@@ -319,3 +319,51 @@ print(quality.evaluate(events))
 curl -s http://localhost:8000/api/metrics/quality_tags?session_id=exp_<id> | python3 -m json.tool | head -40
 curl -s http://localhost:8000/api/sessions/exp_<id>/quality_tags | python3 -m json.tool | head -40
 ```
+
+## 16. Calibration & stabilization framework artifacts
+
+- Discover presets:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator --list
+```
+
+- Plan a sweep:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator --preset distance_sweep --plan
+```
+
+- After captures, aggregate:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator \
+    --preset distance_sweep \
+    --sessions experiments/exp_001/ experiments/exp_002/ experiments/exp_003/
+```
+
+- Standalone analyzer CLIs:
+
+```bash
+python3 -m research.analysis.session_aggregator --sessions experiments/exp_*/ \
+    --sweep-dimension distance_m
+python3 -m research.analysis.session_comparison \
+    --baseline experiments/exp_001/ --modified experiments/exp_002/
+python3 -m research.analysis.stability_score --session experiments/exp_001/
+python3 -m research.analysis.calibration recommend-thresholds \
+    --session experiments/exp_001/ --target-matched-rate 0.50 \
+    --out experiments/exp_001/summaries/threshold_recommendation.json
+```
+
+- Cloud endpoints (server running):
+
+```bash
+curl -s "http://localhost:8000/api/aggregate/sessions?ids=exp_001&ids=exp_002" | python3 -m json.tool | head -40
+curl -s "http://localhost:8000/api/compare/sessions?baseline=exp_001&modified=exp_002" | python3 -m json.tool
+curl -s "http://localhost:8000/api/experiments/pilot/aggregate" | python3 -m json.tool | head -40
+curl -s "http://localhost:8000/api/evaluation/orientation?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/pad?session_id=exp_001&attack_type=print" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/thermal?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/offload_efficiency?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/latency?session_id=exp_001" | python3 -m json.tool
+```
