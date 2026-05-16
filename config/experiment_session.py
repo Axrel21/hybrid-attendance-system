@@ -67,6 +67,15 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "DEBUG_YUNET_SCORE_TH",
     "DEBUG_JPEG_QUALITY",
     "AUTO_EXPERIMENT_REPORT",
+    # Pass-9 minimal runtime stabilization knobs (defaults preserve the
+    # historic behaviour). Captured here so a session's snapshot pins
+    # exactly which stabilizers were active during the run.
+    "YUNET_INPUT_W",
+    "YUNET_INPUT_H",
+    "BBOX_EMA_ALPHA",
+    "SIM_EMA_ALPHA",
+    "MATCH_PERSISTENCE_FRAMES",
+    "PAD_SPOOF_STREAK_REQUIRED",
 )
 @dataclass
 class ExperimentPaths:

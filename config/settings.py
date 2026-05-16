@@ -102,10 +102,21 @@ MOTION_MIN_THRESHOLD = 0.35    # was 0.5; lets near-still real users qualify as 
 #   ORIENTATION_OVERHEAD_TH <= ratio < ORIENTATION_TILTED_TH -> TILTED
 #   ratio >= ORIENTATION_TILTED_TH                -> FRONTAL
 #
-# Defaults (0.60 / 0.90) preserve the original behaviour exactly.
-ORIENTATION_OVERHEAD_TH = 0.60
-ORIENTATION_TILTED_TH   = 0.915
-ORIENTATION_SMOOTHING_WINDOW = 5  # majority-vote temporal window length
+# Defaults (0.60 / 0.915 / 5) preserve the original behaviour exactly.
+# Override via env so a session can be calibrated without editing this file:
+#   ORIENTATION_OVERHEAD_TH=0.85 \
+#   ORIENTATION_TILTED_TH=1.00 \
+#   ORIENTATION_SMOOTHING_WINDOW=7 \
+#   python run.py
+# Reference-experiment analysis (docs/reference_experiment_analysis.md)
+# shows the observed orient_ratio floor is ~0.80, so OVERHEAD_TH=0.60 is
+# structurally unreachable on the tested camera geometry; values around
+# 0.85–0.90 make OVERHEAD a real bucket.
+ORIENTATION_OVERHEAD_TH = float(os.environ.get("ORIENTATION_OVERHEAD_TH", "0.60"))
+ORIENTATION_TILTED_TH   = float(os.environ.get("ORIENTATION_TILTED_TH",   "0.915"))
+ORIENTATION_SMOOTHING_WINDOW = max(
+    1, int(os.environ.get("ORIENTATION_SMOOTHING_WINDOW", "5"))
+)  # majority-vote temporal window length
 
 # Minimum IoU between the tracker box and a YuNet face to attach *orientation
 # telemetry* when the strict pipeline match (DETECTION_MATCH_IOU in main) fails.
@@ -219,3 +230,42 @@ DEBUG_JPEG_QUALITY = int(os.environ.get("DEBUG_JPEG_QUALITY", "88"))
 
 # Post-run plots + summaries (edge.experiment_report). OFF=0 skips to save Pi time/SD.
 AUTO_EXPERIMENT_REPORT = _env_truthy("AUTO_EXPERIMENT_REPORT", "1")
+
+# =====================================================================
+# Minimal runtime stabilization knobs (pass 9)
+# =====================================================================
+# All defaults preserve the original behaviour. Each knob gates an
+# optional, additive stabilizer in ``edge.stabilization``. See
+# ``docs/STABILIZATION_KNOBS.md`` for behaviour and recommended values.
+#
+# YuNet input resolution (default matches the historic hardcoded 640x480).
+# Lowering to 480x360 or 320x240 reduces detection latency proportionally
+# at the cost of small-face sensitivity. Detection threshold scaling is
+# automatic via cv2.FaceDetectorYN.setInputSize().
+YUNET_INPUT_W = max(64, int(os.environ.get("YUNET_INPUT_W", "640")))
+YUNET_INPUT_H = max(64, int(os.environ.get("YUNET_INPUT_H", "480")))
+
+# Optional bbox EMA smoothing. 0.0 = disabled (current behaviour). When
+# in (0, 1], each track's (x, y, w, h) is blended with the previous
+# smoothed bbox via ``new = alpha * raw + (1 - alpha) * prev``. Reference
+# analysis (yunet_stabilization.py) shows alpha=0.30 reduces width-step
+# jitter by ~37 % at the cost of one frame of lag.
+BBOX_EMA_ALPHA = max(0.0, min(1.0, float(os.environ.get("BBOX_EMA_ALPHA", "0.0"))))
+
+# Optional similarity-score EMA. 0.0 = disabled (current behaviour).
+# Smooths the per-frame ``sim`` value before threshold comparison. The
+# logged ``sim`` column in diagnostic_log.csv reflects whatever value
+# drives the decision — i.e., the smoothed value when this is set.
+# alpha=0.30 collapses sim-std by ~11 % in the reference data.
+SIM_EMA_ALPHA = max(0.0, min(1.0, float(os.environ.get("SIM_EMA_ALPHA", "0.0"))))
+
+# Minimum consecutive MATCHED frames before an attendance log row is
+# written. 1 = current behaviour. Higher values damp identity-flicker
+# at the cost of slower first-time attendance marking.
+MATCH_PERSISTENCE_FRAMES = max(1, int(os.environ.get("MATCH_PERSISTENCE_FRAMES", "1")))
+
+# Minimum consecutive SPOOF frames from the liveness engine before the
+# pipeline accepts the SPOOF verdict. 1 = current behaviour. Higher
+# values damp false-positive spoof rejections caused by single-frame
+# rigid-motion glitches.
+PAD_SPOOF_STREAK_REQUIRED = max(1, int(os.environ.get("PAD_SPOOF_STREAK_REQUIRED", "1")))

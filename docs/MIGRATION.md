@@ -337,3 +337,39 @@ changes. Companion docs:
 - All existing CSV schemas.
 - Deployment manifests, `cloud/requirements.txt`, shared contracts.
 - No new dependencies — every new analyzer reuses pinned pandas + numpy.
+
+---
+
+## Ninth pass — Minimal runtime stabilization implementation
+
+Builds on the pass-8 analysis. Adds six env-driven knobs, four small
+stabilizer classes, and narrow integration points in `edge/main.py`.
+**Defaults preserve historic behaviour exactly** — every change is
+opt-in via env vars. Companion docs:
+[`docs/STABILIZATION_KNOBS.md`](STABILIZATION_KNOBS.md),
+[`docs/minimal_runtime_stabilization_summary.md`](minimal_runtime_stabilization_summary.md).
+
+### Additions
+
+| Path | Purpose |
+|------|---------|
+| `edge/stabilization.py` | `BBoxEMASmoother`, `SimEMASmoother`, `MatchPersistenceCounter`, `PADSpoofStreakSmoother`. Pure Python, no heavy deps. Each is a no-op at its default setting. |
+| `docs/STABILIZATION_KNOBS.md` | Env-var reference catalogue. |
+| `docs/minimal_runtime_stabilization_summary.md` | Concise change record for this pass. |
+
+### Modifications
+
+| Path | Change |
+|------|--------|
+| `config/settings.py` | Three orientation constants made env-overridable; six new env-driven knobs (`YUNET_INPUT_W/H`, `BBOX_EMA_ALPHA`, `SIM_EMA_ALPHA`, `MATCH_PERSISTENCE_FRAMES`, `PAD_SPOOF_STREAK_REQUIRED`). All defaults preserve historic behaviour. |
+| `config/experiment_session.py` | `_SETTINGS_SNAPSHOT_KEYS` extended so every new knob lands in `settings_snapshot.json`. |
+| `edge/main.py` | YuNet input reads `settings.YUNET_INPUT_W/H` (instead of `(640, 480)` literal); four stabilizer instances created in `__init__`; narrow integration in the per-track loop (post-match bbox smoothing, post-liveness PAD smoothing, post-`pose_aware_match` sim smoothing, MATCHED-branch persistence gating); per-track state reset in the existing `NO_MATCH` cleanup. Telemetry-backed: `dbg["face_w"]`, `dbg["face_h"]`, `dbg["sim"]`, `dbg["lbl"]` reflect post-stabilization values. ≈ 30 net new lines. |
+
+### Intentionally not changed (ninth pass)
+
+- `DIAG_COLUMNS`, `TELEMETRY_CSV_COLUMNS`, `attendance_log` header.
+- `edge/orientation.py`, `edge/cloud_client.py`, `edge/offload_router.py`,
+  `edge/liveness.py`, `cloud/main.py`, `cloud_backend/*`.
+- Deployment manifests, `cloud/requirements.txt`, shared contracts.
+- The hybrid offload contract.
+- No new dependencies.

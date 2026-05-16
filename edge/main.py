@@ -67,6 +67,12 @@ from edge.liveness import LivenessEngine
 from edge.align import align_face
 from edge.orientation import PoseEstimator
 from edge.pipeline_controller import PipelineController
+from edge.stabilization import (
+    BBoxEMASmoother,
+    MatchPersistenceCounter,
+    PADSpoofStreakSmoother,
+    SimEMASmoother,
+)
 from edge.utils import is_valid_face
 
 
@@ -278,11 +284,14 @@ class FinalHybridEdge:
         if settings.SIMULATE_PI:
             cv2.setNumThreads(settings.PI_MAX_THREADS)
 
-        # ---- YuNet (640x480 fixed resolution) ----
-        self.yunet = cv2.FaceDetectorYN.create(model_path1, "", (640, 480), 0.8, 0.3, 5000)
+        # ---- YuNet (configurable input resolution via settings.YUNET_INPUT_W/H) ----
+        _yunet_w = int(settings.YUNET_INPUT_W)
+        _yunet_h = int(settings.YUNET_INPUT_H)
+        self.yunet = cv2.FaceDetectorYN.create(model_path1, "", (_yunet_w, _yunet_h), 0.8, 0.3, 5000)
         # P3 fix: move constant setter calls out of the hot loop.
-        # Resolution is fixed at 640x480; thresholds never change at runtime.
-        self.yunet.setInputSize((640, 480))
+        # Resolution defaults to 640x480 (historic value) but can be lowered to
+        # 480x360 / 320x240 to trade small-face sensitivity for detection latency.
+        self.yunet.setInputSize((_yunet_w, _yunet_h))
         self.yunet.setScoreThreshold(0.50)
         self.yunet.setNMSThreshold(0.30)
 
@@ -356,6 +365,28 @@ class FinalHybridEdge:
             "Cloud client → %s | routing=%s | force_offload=%s | force_edge=%s",
             _cloud_url, _routing_strategy, _force_offload, _force_edge,
         )
+
+        # ---- Optional minimal runtime stabilizers (pass 9). Each is a
+        # ----  no-op at the default setting value so the historic runtime
+        # ----  behaviour is preserved exactly. See docs/STABILIZATION_KNOBS.md.
+        self._bbox_smoother = BBoxEMASmoother(settings.BBOX_EMA_ALPHA)
+        self._sim_smoother = SimEMASmoother(settings.SIM_EMA_ALPHA)
+        self._match_persistence = MatchPersistenceCounter(settings.MATCH_PERSISTENCE_FRAMES)
+        self._pad_smoother = PADSpoofStreakSmoother(settings.PAD_SPOOF_STREAK_REQUIRED)
+        if (
+            self._bbox_smoother.enabled
+            or self._sim_smoother.enabled
+            or self._match_persistence.enabled
+            or self._pad_smoother.enabled
+            or _yunet_w != 640 or _yunet_h != 480
+        ):
+            LOG_RUNTIME.info(
+                "Stabilizers active: bbox_ema=%.2f sim_ema=%.2f match_persistence=%d "
+                "pad_spoof_streak=%d yunet_input=(%d,%d)",
+                settings.BBOX_EMA_ALPHA, settings.SIM_EMA_ALPHA,
+                settings.MATCH_PERSISTENCE_FRAMES, settings.PAD_SPOOF_STREAK_REQUIRED,
+                _yunet_w, _yunet_h,
+            )
 
         # ---- Performance instrumentation state ----
         self._frame_count  = 0
@@ -722,9 +753,25 @@ class FinalHybridEdge:
                         self.liveness.last_signals.pop(track_id, None)
                         self.liveness.real_streak.pop(track_id, None)
                         self.liveness.planar_streak.pop(track_id, None)
+                        # Pass-9 stabilizers: drop per-track state when the
+                        # detector loses this track so smoothed values don't
+                        # leak across re-acquisitions.
+                        self._bbox_smoother.reset(track_id)
+                        self._sim_smoother.reset(track_id)
+                        self._match_persistence.reset(track_id)
+                        self._pad_smoother.reset(track_id)
                         dbg["rsn"]      = "No detection match"
                         dbg["decision"] = "NO_MATCH"
                         continue
+
+                    # Pass-9: optional bbox EMA smoothing for downstream crop /
+                    # distance / brightness reads. find_best_face_match above
+                    # used the raw box; smoothing here keeps the IoU match
+                    # accurate while damping crop jitter. No-op at alpha=0.0.
+                    if self._bbox_smoother.enabled:
+                        x, y, fw, fh = self._bbox_smoother.smooth(track_id, (x, y, fw, fh))
+                        dbg["face_w"] = fw
+                        dbg["face_h"] = fh
 
                     distance         = settings.K_FOCAL / (np.sqrt(fw * fh) + 1e-5)
                     dbg["distance"]  = float(distance)
@@ -738,6 +785,10 @@ class FinalHybridEdge:
                     lbl, conf, rsn, m_score, g_score = self.liveness.assess_frame(
                         track_id, mode, prev_gray, curr_gray, frame, box, landmarks)
                     dbg["t_liveness_ms"] = (time.perf_counter() - t0) * 1000.0
+                    # Pass-9: optional spoof-streak smoothing — downgrades a
+                    # single-frame SPOOF to UNCERTAIN until the streak reaches
+                    # PAD_SPOOF_STREAK_REQUIRED. No-op at the default value 1.
+                    lbl = self._pad_smoother.smooth(track_id, lbl)
                     dbg["lbl"]       = lbl
                     dbg["live_conf"] = float(conf)
                     dbg["rsn"]       = rsn
@@ -788,6 +839,12 @@ class FinalHybridEdge:
                     t0 = time.perf_counter()
                     identity, sim = self.controller.pose_aware_match(mean_emb, mode)
                     dbg["t_match_ms"] = (time.perf_counter() - t0) * 1000.0
+                    # Pass-9: optional sim EMA — collapses single-frame swings
+                    # before the threshold comparison. The logged dbg["sim"]
+                    # reflects whatever value drives the decision, so the
+                    # diagnostic CSV stays self-consistent. No-op at alpha=0.0.
+                    if self._sim_smoother.enabled:
+                        sim = self._sim_smoother.smooth(track_id, sim)
                     dbg["identity"]   = identity
                     dbg["sim"]        = float(sim)
 
@@ -805,11 +862,23 @@ class FinalHybridEdge:
 
                     if sim >= th_high:
                         dbg["decision"] = "MATCHED"
-                        if time.time() - self.cooldowns.get(identity, 0) > 300:
+                        # Pass-9: optional match-persistence gate. At the default
+                        # MATCH_PERSISTENCE_FRAMES=1 this is a no-op; higher
+                        # values require N consecutive MATCHED frames before the
+                        # attendance log row is written (the dbg "MATCHED"
+                        # decision still records every frame for telemetry).
+                        _run_len, _persist_ok = self._match_persistence.observe(
+                            track_id, identity,
+                        )
+                        if _persist_ok and time.time() - self.cooldowns.get(identity, 0) > 300:
                             self.cooldowns[identity] = time.time()
                             LOG_RUNTIME.info("Attendance marked: %s", identity)
                     #offloading algorithm
                     elif sim >= th_mid:
+                        # Pass-9: reset the match-persistence counter on any
+                        # non-MATCHED outcome so the "consecutive" semantics
+                        # stay strict.
+                        self._match_persistence.reset(track_id)
                         dbg["decision"] = "OFFLOAD_TO_CLOUD"
  
                         routing = self.offload_router.decide(edge_confidence=sim)
@@ -876,6 +945,9 @@ class FinalHybridEdge:
                                 )
                     else:
                         dbg["decision"] = "BELOW_THRESHOLD"
+                        # Pass-9: BELOW_THRESHOLD also breaks the consecutive
+                        # MATCHED chain — reset the persistence counter.
+                        self._match_persistence.reset(track_id)
 
                     total_latency = (time.time() - loop_start) * 1000.0
                     self.csv_writer.writerow([

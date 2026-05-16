@@ -21,6 +21,8 @@ Telemetry-driven embedded AI pipeline: **YuNet + MobileFaceNet** on the edge, op
 | Experiment protocol metadata | [docs/EXPERIMENT_PROTOCOL.md](docs/EXPERIMENT_PROTOCOL.md) |
 | Reference experiment analysis | [docs/reference_experiment_analysis.md](docs/reference_experiment_analysis.md) |
 | Runtime stabilization phase | [docs/runtime_stabilization_phase_summary.md](docs/runtime_stabilization_phase_summary.md) |
+| Runtime stabilization knobs | [docs/STABILIZATION_KNOBS.md](docs/STABILIZATION_KNOBS.md) |
+| Minimal runtime stabilization summary | [docs/minimal_runtime_stabilization_summary.md](docs/minimal_runtime_stabilization_summary.md) |
 | Repository layout (current vs target) | [docs/REPOSITORY_LAYOUT.md](docs/REPOSITORY_LAYOUT.md) |
 | Cross-process contracts | [shared/README.md](shared/README.md) |
 | Composite cloud backend | [cloud_backend/README.md](cloud_backend/README.md) |

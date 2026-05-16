@@ -397,3 +397,46 @@ ls experiments/exp_<id>/summaries/
   - `pad_stabilization.pad_stability_score` ≥ 0.30 for genuine sessions
   - `offload_performance.cadence.cv` ≤ 0.30
   - `offload_performance.cpu_hotspots.rows[0].stage == "t_detect_ms"` (always)
+
+## 18. Minimal runtime stabilization knobs (ninth pass)
+
+- Defaults preserve historic behaviour — `python run.py` with no env
+  overrides is identical to the pass-7 build:
+
+```bash
+python3 -c "
+from config import settings
+assert settings.ORIENTATION_OVERHEAD_TH == 0.60
+assert settings.YUNET_INPUT_W == 640 and settings.YUNET_INPUT_H == 480
+assert settings.BBOX_EMA_ALPHA == 0.0 and settings.SIM_EMA_ALPHA == 0.0
+assert settings.MATCH_PERSISTENCE_FRAMES == 1
+assert settings.PAD_SPOOF_STREAK_REQUIRED == 1
+print('defaults preserve historic behaviour')
+"
+```
+
+- Each stabilizer class is a pure-Python no-op at its default value:
+
+```bash
+python3 -c "
+from edge.stabilization import (BBoxEMASmoother, SimEMASmoother,
+    MatchPersistenceCounter, PADSpoofStreakSmoother)
+assert BBoxEMASmoother(0.0).smooth(1, (100,100,50,60)) == (100,100,50,60)
+assert SimEMASmoother(0.0).smooth(1, 0.7) == 0.7
+assert MatchPersistenceCounter(1).observe(1, 'x') == (1, True)
+assert PADSpoofStreakSmoother(1).smooth(1, 'SPOOF') == 'SPOOF'
+print('stabilizers no-op at defaults')
+"
+```
+
+- Env overrides honoured at runtime; settings_snapshot.json pins the
+  active configuration so `session_comparison` picks up the delta:
+
+```bash
+ORIENTATION_OVERHEAD_TH=0.85 BBOX_EMA_ALPHA=0.30 MATCH_PERSISTENCE_FRAMES=2 \
+    python run.py
+ls experiments/exp_<id>/config/settings_snapshot.json
+```
+
+- See `docs/STABILIZATION_KNOBS.md` for the full env-var reference and
+  recommended starting points.
