@@ -1,0 +1,13 @@
+{
+  "batch_timestamp": "20260516_145932",
+  "experiment_root": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260516_145929",
+  "telemetry_csv": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260516_145929/telemetry/telemetry_log.csv",
+  "diagnostic_csv": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260516_145929/diagnostics/diagnostic_log.csv",
+  "telemetry_rows": 0,
+  "diagnostic_rows": 0,
+  "experiment_label": null,
+  "metadata": {
+    "experiment_id": "exp_20260516_145929"
+  },
+  "runtime_log_lines": 8
+}

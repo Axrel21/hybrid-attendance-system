@@ -56,6 +56,8 @@ import logging
 import os
 import sys
 import time
+from dotenv import load_dotenv
+load_dotenv()
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_ROOT)

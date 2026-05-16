@@ -1,7 +1,13 @@
 import os
 
 import cv2
-import tensorflow as tf
+try:
+    from tflite_runtime.interpreter import Interpreter
+    BACKEND = "tflite-runtime"
+except ImportError:
+    import tensorflow as tf
+    Interpreter = tf.lite.Interpreter
+    BACKEND = "tensorflow"
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _MODELS = os.path.join(_ROOT, "models")
@@ -27,7 +33,7 @@ except Exception as e:
 
 # 3. Test TFLite Loading
 try:
-    interpreter = tf.lite.Interpreter(
+    interpreter = Interpreter(
         model_path=os.path.join(_MODELS, "mobilefacenet.tflite")
     )
     interpreter.allocate_tensors()

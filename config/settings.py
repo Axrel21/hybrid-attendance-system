@@ -170,7 +170,7 @@ STREAM_JPEG_QUALITY = int(os.environ.get("STREAM_JPEG_QUALITY", "75"))
 #   "libcamera_subprocess" — rpicam-vid subprocess; always works on Pi OS
 #   "picamera2"            — Picamera2 (only works with matching Python ABI)
 #   "v4l2"                 — explicit V4L2 + MJPEG
-CAMERA_BACKEND = os.environ.get("CAMERA_BACKEND", "opencv")
+CAMERA_BACKEND = os.getenv("CAMERA_BACKEND", "libcamera_subprocess")
 
 # =====================================================================
 # SD-card I/O coalescing (Pi deployment)

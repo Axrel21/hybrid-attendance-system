@@ -1,0 +1,25 @@
+{
+  "batch_timestamp": "20260513_133520",
+  "experiment_root": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260513_132601",
+  "telemetry_csv": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260513_132601/telemetry/telemetry_log.csv",
+  "diagnostic_csv": "/home/axrel/projects/edge-facial-recognition-pipeline/experiments/exp_20260513_132601/diagnostics/diagnostic_log.csv",
+  "telemetry_rows": 3553,
+  "diagnostic_rows": 14816,
+  "metadata": {
+    "experiment_id": "exp_20260513_132601"
+  },
+  "fps_mean": 6.597137630171686,
+  "fps_median": 7.12,
+  "latency_total_ms_mean": 156.01356318603996,
+  "latency_total_ms_peak": 343.2,
+  "latency_total_ms_p99": 316.884,
+  "cpu_temp_mean": 67.10214446952595,
+  "cpu_temp_max": 73.5,
+  "dropped_frames_heuristic": 53,
+  "dropped_frame_threshold_ms": 275.27,
+  "median_frame_interval_ms": 137.635,
+  "spoof_rows": 230,
+  "real_rows": 716,
+  "sim_std_mean_over_tracks": 0.1765194768725248,
+  "runtime_log_lines": 9
+}
