@@ -150,7 +150,7 @@ VERBOSE_DEBUG = os.environ.get("VERBOSE_DEBUG", "0") not in ("0", "false", "Fals
 # Required when running without a connected display (SSH, systemd service).
 # Set via env var to avoid code edits:
 #     export HEADLESS=1   (bash)   $env:HEADLESS=1 (PowerShell)
-HEADLESS = os.environ.get("HEADLESS", "0") not in ("0", "false", "False", "")
+HEADLESS = os.environ.get("HEADLESS", "1") not in ("0", "false", "False", "")
 
 # STREAM_VIDEO — optional Flask MJPEG server for remote debugging / monitoring.
 # Disabled by default. Does not replace native cv2.imshow when HEADLESS=0.
@@ -181,7 +181,12 @@ LOG_BUFFER_SIZE = 8192
 
 # Flush the write buffer to disk every N frames (~every 2s at 15fps).
 # Lower values reduce data loss on power-cut; higher values reduce I/O.
-LOG_FLUSH_INTERVAL = 30
+LOG_FLUSH_INTERVAL = int(os.environ.get("LOG_FLUSH_INTERVAL", "30"))
+
+# Write one diagnostic CSV row every N frames per active track.
+# Default=1 preserves current per-frame behaviour. Higher values reduce SD
+# write pressure at the cost of diagnostic resolution.
+DIAG_LOG_EVERY_N = max(1, int(os.environ.get("DIAG_LOG_EVERY_N", "1")))
 
 # Auto-rotate diagnostic_log.csv when it exceeds this size (MB).
 # Keeps the SD card from filling up during long calibration sessions.
@@ -209,7 +214,7 @@ THERMAL_WARN_INTERVAL_S = float(os.environ.get("THERMAL_WARN_INTERVAL_S", "60"))
 # TELEMETRY_LOG_EVERY_N>1 subsamples rows (reduces SD-card writes).
 # TELEMETRY_DT_WINDOW — rolling window size for mean/std of frame intervals (ms).
 TELEMETRY = _env_truthy("TELEMETRY", "1")
-TELEMETRY_OVERLAY = _env_truthy("TELEMETRY_OVERLAY", "1")
+TELEMETRY_OVERLAY = _env_truthy("TELEMETRY_OVERLAY", "0")
 TELEMETRY_LOG_EVERY_N = max(1, int(os.environ.get("TELEMETRY_LOG_EVERY_N", "1")))
 TELEMETRY_DT_WINDOW = max(2, int(os.environ.get("TELEMETRY_DT_WINDOW", "30")))
 
@@ -269,3 +274,16 @@ MATCH_PERSISTENCE_FRAMES = max(1, int(os.environ.get("MATCH_PERSISTENCE_FRAMES",
 # values damp false-positive spoof rejections caused by single-frame
 # rigid-motion glitches.
 PAD_SPOOF_STREAK_REQUIRED = max(1, int(os.environ.get("PAD_SPOOF_STREAK_REQUIRED", "1")))
+
+# Embedding inference cadence. When the per-track embedding buffer is already
+# full (holds LIVENESS_WINDOW entries), run align_face + extract_embedding only
+# every N frames instead of every frame. Default=1 preserves current behaviour.
+# At N=2 TFLite invocations halve after the 8-frame warmup; the rolling mean
+# embedding used for recognition becomes at most N frames stale.
+EMBED_CADENCE_N = max(1, int(os.environ.get("EMBED_CADENCE_N", "1")))
+
+# YuNet detector cadence. Run detect() only every N frames; reuse cached
+# result on skip frames. Tracker executes every frame regardless.
+# Default=1 preserves current per-frame behaviour exactly.
+# Conservative deployment assumption: N=2 only.
+YUNET_CADENCE_N = max(1, int(os.environ.get("YUNET_CADENCE_N", "1")))
