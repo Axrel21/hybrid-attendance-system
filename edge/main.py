@@ -243,6 +243,8 @@ DIAG_COLUMNS = [
     "cloud_outcome", "cloud_identity", "cloud_arcface_confidence",
     "cloud_verified", "cloud_rtt_ms", "cloud_server_total_ms",
     "jpeg_encode_ms", "image_size_bytes", "edge_cloud_agree",
+    # --- YuNet cadence gating ---
+    "yunet_cadence_skip",  # 1 when detection was reused from cache; 0 otherwise
 ]
 
 
@@ -302,6 +304,14 @@ class FinalHybridEdge:
         self.interpreter.allocate_tensors()
         self.in_idx  = self.interpreter.get_input_details()[0]["index"]
         self.out_idx = self.interpreter.get_output_details()[0]["index"]
+        from shared.contracts import is_valid_mobilefacenet_dim
+        _out_shape = self.interpreter.get_output_details()[0]["shape"]
+        _emb_dim = int(_out_shape[-1])
+        assert is_valid_mobilefacenet_dim(_emb_dim), (
+            f"MobileFaceNet output dim {_emb_dim} not in known dims "
+            f"(128 classic / 192 quantised). Check models/mobilefacenet.tflite."
+        )
+        LOG_RUNTIME.info("MobileFaceNet embedding dim confirmed: %d", _emb_dim)
 
         # ---- Sub-modules ----
         self.tracker   = HybridTracker()
@@ -397,6 +407,15 @@ class FinalHybridEdge:
         self._cpu_temp_c   = 0.0
         if _PSUTIL_AVAILABLE:
             self._psutil_proc = _psutil.Process()
+
+        # ---- YuNet cadence state ----
+        # _cached_faces: last detect() output; None until first detection runs.
+        # _detection_skipped: True on frames where detect() was not called.
+        # _last_liveness: per-track last (lbl, conf, rsn, m_score, g_score) so
+        #   skip frames can carry forward the result without calling assess_frame.
+        self._cached_faces: object = None
+        self._detection_skipped: bool = False
+        self._last_liveness: dict = {}
 
         # Overlays on frame: native window and/or MJPEG viewers need annotations.
         self._show_overlay = (not settings.HEADLESS) or settings.STREAM_VIDEO
@@ -559,6 +578,8 @@ class FinalHybridEdge:
             dbg.get("jpeg_encode_ms"),
             dbg.get("image_size_bytes"),
             dbg.get("edge_cloud_agree"),
+            # YuNet cadence gating
+            int(dbg.get("yunet_cadence_skip", False)),
         ])
 
     # ------------------------------------------------------------------
@@ -596,9 +617,21 @@ class FinalHybridEdge:
             curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             # ---- YuNet detection (setters are in __init__ now) ----
-            t0 = time.perf_counter()
-            _, faces = self.yunet.detect(frame)
-            t_detect_ms = (time.perf_counter() - t0) * 1000.0
+            # Run detect() every YUNET_CADENCE_N frames; reuse cached result on
+            # skip frames. t_detect_ms=0.0 on skip frames — cadence is visible
+            # in telemetry. Cold-start guard: _cached_faces is None until the
+            # first detection fires; treat None as empty (no faces) so the
+            # tracker and downstream paths behave correctly.
+            if self._frame_count % settings.YUNET_CADENCE_N == 0:
+                t0 = time.perf_counter()
+                _, faces = self.yunet.detect(frame)
+                t_detect_ms = (time.perf_counter() - t0) * 1000.0
+                self._cached_faces = faces
+                self._detection_skipped = False
+            else:
+                faces = self._cached_faces  # None until first detect() fires
+                t_detect_ms = 0.0
+                self._detection_skipped = True
 
             raw_count  = 0 if faces is None else len(faces)
             faces      = suppress_overlapping(faces)
@@ -705,6 +738,8 @@ class FinalHybridEdge:
                     "jpeg_encode_ms":           None,
                     "image_size_bytes":         None,
                     "edge_cloud_agree":         None,
+                    # YuNet cadence gating
+                    "yunet_cadence_skip":       False,
                 }
 
                 try:
@@ -753,6 +788,7 @@ class FinalHybridEdge:
                         self.liveness.last_signals.pop(track_id, None)
                         self.liveness.real_streak.pop(track_id, None)
                         self.liveness.planar_streak.pop(track_id, None)
+                        self._last_liveness.pop(track_id, None)
                         # Pass-9 stabilizers: drop per-track state when the
                         # detector loses this track so smoothed values don't
                         # leak across re-acquisitions.
@@ -780,11 +816,25 @@ class FinalHybridEdge:
                         dbg["decision"] = "OUT_OF_RANGE"
                         continue
 
-                    # P2 fix: pass curr_gray to avoid redundant BGR->Gray in liveness
-                    t0 = time.perf_counter()
-                    lbl, conf, rsn, m_score, g_score = self.liveness.assess_frame(
-                        track_id, mode, prev_gray, curr_gray, frame, box, landmarks)
-                    dbg["t_liveness_ms"] = (time.perf_counter() - t0) * 1000.0
+                    # P2 fix: pass curr_gray to avoid redundant BGR->Gray in liveness.
+                    # On detection-skip frames landmarks are stale (cached from the
+                    # previous detect() call) — do not feed them into optical flow.
+                    # Carry forward the last stored liveness result instead.
+                    if self._detection_skipped:
+                        dbg["yunet_cadence_skip"] = True
+                        _prior = self._last_liveness.get(track_id)
+                        if _prior is None:
+                            lbl, conf, rsn, m_score, g_score = (
+                                "ANALYZING", 0.5, "Cadence skip (no prior result)", 0.0, 0.0
+                            )
+                        else:
+                            lbl, conf, rsn, m_score, g_score = _prior
+                    else:
+                        t0 = time.perf_counter()
+                        lbl, conf, rsn, m_score, g_score = self.liveness.assess_frame(
+                            track_id, mode, prev_gray, curr_gray, frame, box, landmarks)
+                        dbg["t_liveness_ms"] = (time.perf_counter() - t0) * 1000.0
+                        self._last_liveness[track_id] = (lbl, conf, rsn, m_score, g_score)
                     # Pass-9: optional spoof-streak smoothing — downgrades a
                     # single-frame SPOOF to UNCERTAIN until the streak reaches
                     # PAD_SPOOF_STREAK_REQUIRED. No-op at the default value 1.
@@ -815,8 +865,19 @@ class FinalHybridEdge:
                         self.embedding_buffers[track_id] = deque(maxlen=settings.LIVENESS_WINDOW)
 
                     # ---- 5-point alignment + embedding ----
+                    # Always run during the fill phase (buffer not yet full).
+                    # Once full, run only every EMBED_CADENCE_N frames to reduce
+                    # TFLite invocations. t_embed_ms=0 on skip frames so cadence
+                    # is visible in telemetry. aligned=None on skip frames so the
+                    # cloud offload guard (aligned is not None) stays correct.
                     bgr_crop = frame[max(0, y):y + fh, max(0, x):x + fw]
-                    if bgr_crop.size > 0:
+                    aligned = None
+                    _buf_full = len(self.embedding_buffers[track_id]) >= settings.LIVENESS_WINDOW
+                    _do_embed = bgr_crop.size > 0 and not self._detection_skipped and (
+                        not _buf_full
+                        or self._frame_count % settings.EMBED_CADENCE_N == 0
+                    )
+                    if _do_embed:
                         t0 = time.perf_counter()
                         local_lm    = [(lx - x, ly - y) for lx, ly in landmarks]
                         aligned     = align_face(bgr_crop, local_lm)
@@ -979,7 +1040,8 @@ class FinalHybridEdge:
                             settings.DEBUG_YUNET_SCORE_TH,
                         ):
                             self._debug_writer.save(frame, _subdir, _tag, _extra)
-                    self._write_diag(loop_start, w, h, track_id, dbg)
+                    if self._frame_count % settings.DIAG_LOG_EVERY_N == 0:
+                        self._write_diag(loop_start, w, h, track_id, dbg)
 
             t_tracks_ms = (time.perf_counter() - t_tracks_start) * 1000.0
 

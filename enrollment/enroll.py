@@ -52,6 +52,12 @@ class Enroller:
         self.interpreter.allocate_tensors()
         self.input_idx  = self.interpreter.get_input_details()[0]['index']
         self.output_idx = self.interpreter.get_output_details()[0]['index']
+        from shared.contracts import is_valid_mobilefacenet_dim
+        _out_dim = int(self.interpreter.get_output_details()[0]['shape'][-1])
+        assert is_valid_mobilefacenet_dim(_out_dim), (
+            f"Unexpected embedding dim {_out_dim}. "
+            f"Enrollment and runtime must use the same model."
+        )
 
     def extract_embedding(self, face_bgr: np.ndarray) -> list[float]:
         """Expects a canonical 112x112 BGR aligned face (as produced by
