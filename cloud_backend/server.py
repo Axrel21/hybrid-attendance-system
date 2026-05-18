@@ -79,11 +79,13 @@ app: "FastAPI" = _load_verification_app()
 # Late imports: these need fastapi but no cv2 / insightface.
 from cloud_backend.telemetry.api import router as telemetry_router  # noqa: E402
 from cloud_backend.dashboard.api import router as dashboard_router  # noqa: E402
+from cloud_backend.api.lectures import router as attendance_lectures_router  # noqa: E402
 from cloud_backend.dashboard import websocket as ws_module  # noqa: E402
 from cloud_backend.storage import get_default_storage  # noqa: E402
 
 app.include_router(telemetry_router)
 app.include_router(dashboard_router)
+app.include_router(attendance_lectures_router)
 ws_module.register(app)
 
 
@@ -96,6 +98,7 @@ def backend_info() -> dict:
         "verification_routes_present": _has_route(app, "/verify/image"),
         "telemetry_routes_present": _has_route(app, "/telemetry/ingest"),
         "dashboard_routes_present": _has_route(app, "/api/sessions"),
+        "attendance_routes_present": _has_route(app, "/attendance/lectures"),
         "ws_subscribers": ws_module.subscriber_count(),
         "storage_root": str(storage.root),
         "storage_dir_override": os.environ.get("CLOUD_STORAGE_DIR"),
@@ -110,7 +113,8 @@ def _has_route(application: "FastAPI", path: str) -> bool:
 
 
 log.info(
-    "cloud_backend.server ready: telemetry_routes=%d dashboard_routes=%d",
+    "cloud_backend.server ready: telemetry_routes=%d dashboard_routes=%d attendance_routes=%d",
     sum(1 for _ in telemetry_router.routes),
     sum(1 for _ in dashboard_router.routes),
+    sum(1 for _ in attendance_lectures_router.routes),
 )

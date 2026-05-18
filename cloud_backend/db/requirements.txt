@@ -1,0 +1,7 @@
+# Attendance-intelligence database dependencies (Phase 1 foundation).
+#
+#   pip install -r cloud_backend/db/requirements.txt
+
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
