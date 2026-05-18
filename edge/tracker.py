@@ -20,7 +20,7 @@ class HybridTracker:
         self.max_disappeared = max_disappeared
 
     def update(self, rects):
-        if len(rects) == 0:
+        if len(rects) == 0: 
             for obj_id in list(self.disappeared.keys()):
                 self.disappeared[obj_id] += 1
                 if self.disappeared[obj_id] > self.max_disappeared:

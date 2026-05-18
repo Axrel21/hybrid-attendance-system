@@ -20,6 +20,10 @@ import numpy as np
 
 log = logging.getLogger("arcface_verifier")
 
+# Force CPU inference only — avoids partial CUDA initialization when GPU
+# libs (e.g. libcublasLt) are missing, which breaks FaceAnalysis startup.
+_ORT_CPU_PROVIDERS: list[str] = ["CPUExecutionProvider"]
+
 
 class ArcFaceVerifier:
     """
@@ -39,21 +43,19 @@ class ArcFaceVerifier:
       When the gallery is enrolled via ArcFace (offline), we compare 512-d.
     """
 
-    def __init__(self, model_name: str = "buffalo_l", providers: Optional[list] = None):
+    def __init__(self, model_name: str = "buffalo_l"):
         """
         Args:
             model_name: InsightFace model pack name.
                         'buffalo_l'  — accurate, ~700MB, good for server
                         'buffalo_sc' — lighter alternative
-            providers:  ONNX Runtime execution providers.
-                        Defaults to ['CUDAExecutionProvider', 'CPUExecutionProvider']
         """
         self.model_name = model_name
         self._app = None
         self._recognition_model = None
-        self._load(providers)
+        self._load()
 
-    def _load(self, providers: Optional[list]):
+    def _load(self) -> None:
         t0 = time.perf_counter()
 
         try:
@@ -62,17 +64,22 @@ class ArcFaceVerifier:
         except ImportError:
             raise RuntimeError(
                 "insightface not installed. "
-                "Run: pip install insightface onnxruntime-gpu"
+                "Run: pip install insightface onnxruntime"
             )
 
-        if providers is None:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-        log.info(f"Loading InsightFace model pack '{self.model_name}' ...")
+        log.info(
+            "Loading InsightFace model pack '%s' (ONNX Runtime: %s only) ...",
+            self.model_name,
+            _ORT_CPU_PROVIDERS[0],
+        )
+        # InsightFace FaceAnalysis always requires a detection model in the
+        # bundle: it asserts ``'detection' in self.models`` and ``get()`` runs
+        # det_model.detect() before recognition. Omitting ``detection`` from
+        # allowed_modules skips det_*.onnx (“model ignore”) and fails startup.
         self._app = FaceAnalysis(
             name=self.model_name,
-            allowed_modules=["recognition"],   # skip detection — edge handles that
-            providers=providers,
+            allowed_modules=["detection", "recognition"],
+            providers=_ORT_CPU_PROVIDERS,
         )
         self._app.prepare(ctx_id=0, det_size=(160, 160))
 
