@@ -1,2 +1,2 @@
-raw_vs_smoothed_disagreement_rate = 0.0426
+raw_vs_smoothed_disagreement_rate = 0.0544
 Interpretation: fraction of frames where the smoothed (temporal-majority) mode differs from this-frame raw classification. Higher means the smoothing window is doing real work; if 0, smoothing is redundant.
