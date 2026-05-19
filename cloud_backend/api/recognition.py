@@ -37,6 +37,8 @@ async def ingest_recognition_event(
             confidence=payload.confidence,
             source=payload.source,
             timestamp_ms=payload.timestamp_ms,
+            classroom_id=payload.classroom_id,
+            camera_id=payload.camera_id,
         )
         await session.commit()
         return IngestionResult(
@@ -44,6 +46,8 @@ async def ingest_recognition_event(
             disposition=result.disposition,
             gallery_identity=result.gallery_identity,
             lecture_id=str(result.lecture_id) if result.lecture_id else None,
+            classroom_id=str(result.classroom_id) if result.classroom_id else None,
+            camera_id=result.camera_id,
             record_id=str(result.record_id) if result.record_id else None,
             from_state=result.from_state,
             to_state=result.to_state,

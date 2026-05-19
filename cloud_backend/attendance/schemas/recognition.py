@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -10,9 +11,8 @@ from pydantic import BaseModel, Field
 class RecognitionEvent(BaseModel):
     """Inbound wire contract — posted by edge runtime.
 
-    The server resolves the active lecture internally; the edge does NOT
-    supply lecture_id so that this endpoint stays source-agnostic and
-    does not require the edge to track session context.
+    Lecture resolution is classroom-scoped when ``classroom_id`` or
+    ``camera_id`` is supplied (D.2A).  Omit both for D.1 global fallback.
     """
 
     gallery_identity: str = Field(..., min_length=1, max_length=200)
@@ -26,6 +26,15 @@ class RecognitionEvent(BaseModel):
         max_length=50,
         description="Event origin tag, e.g. 'edge_runtime' or 'arcface_cloud'",
     )
+    classroom_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Target classroom for lecture resolution (D.2A)",
+    )
+    camera_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Registered camera id; resolves to classroom via source registry",
+    )
 
 
 class IngestionResult(BaseModel):
@@ -35,6 +44,8 @@ class IngestionResult(BaseModel):
     disposition: str
     gallery_identity: str
     lecture_id: Optional[str] = None
+    classroom_id: Optional[str] = None
+    camera_id: Optional[str] = None
     record_id: Optional[str] = None
     from_state: Optional[str] = None
     to_state: Optional[str] = None
