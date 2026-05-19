@@ -83,10 +83,16 @@ from cloud_backend.api.visibility import router as attendance_visibility_router 
 from cloud_backend.api.lectures import router as attendance_lectures_router  # noqa: E402
 from cloud_backend.api.recognition import router as recognition_router  # noqa: E402
 from cloud_backend.dashboard import websocket as ws_module  # noqa: E402
+from cloud_backend.dashboard.attendance_ui import (  # noqa: E402
+    register_static_mount,
+    router as attendance_dashboard_router,
+)
 from cloud_backend.storage import get_default_storage  # noqa: E402
 
 app.include_router(telemetry_router)
 app.include_router(dashboard_router)
+app.include_router(attendance_dashboard_router)
+register_static_mount(app)
 app.include_router(attendance_visibility_router)
 app.include_router(attendance_lectures_router)
 app.include_router(recognition_router)
@@ -105,6 +111,7 @@ def backend_info() -> dict:
         "attendance_routes_present": _has_route(app, "/attendance/lectures"),
         "recognition_route_present": _has_route(app, "/attendance/recognition/events"),
         "visibility_routes_present": _has_route(app, "/attendance/lectures/active"),
+        "attendance_dashboard_present": _has_route(app, "/dashboard/attendance"),
         "ws_subscribers": ws_module.subscriber_count(),
         "storage_root": str(storage.root),
         "storage_dir_override": os.environ.get("CLOUD_STORAGE_DIR"),

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Attendance Operations</title>
+  <link rel="stylesheet" href="/dashboard/attendance/static/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Attendance Operations</h1>
+    <div class="meta" id="status-meta">
+      <span class="dot"></span>
+      <span id="status-text">Connecting…</span>
+      <span id="last-refresh"></span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Active classrooms</h2>
+      <div id="overview-grid" class="overview-grid"></div>
+      <p id="overview-empty" class="empty" hidden>No active lectures. Start a lecture via the API to see data here.</p>
+    </section>
+
+    <section id="detail" class="detail">
+      <div class="detail-header">
+        <h2 id="detail-title">Lecture detail</h2>
+        <p id="detail-sub" class="sub"></p>
+      </div>
+
+      <div class="panels">
+        <article class="panel">
+          <div class="panel-head">Student attendance</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>State</th>
+                  <th>Events</th>
+                  <th>Last event</th>
+                  <th>Confirmed</th>
+                </tr>
+              </thead>
+              <tbody id="records-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">Event timeline</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Student</th>
+                  <th>Semantic</th>
+                  <th>Transition</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="events-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-head">Recognition telemetry</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Received</th>
+                  <th>Identity</th>
+                  <th>Conf</th>
+                  <th>Camera</th>
+                  <th>Outcome</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="logs-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="/dashboard/attendance/static/app.js"></script>
+</body>
+</html>
