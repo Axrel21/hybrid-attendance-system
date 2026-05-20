@@ -79,6 +79,7 @@ from edge.utils import is_valid_face
 # Track 2 — hybrid cloud verification
 from edge.cloud_client import CloudVerificationClient, OffloadOutcome
 from edge.offload_router import create_router
+from edge.attendance_client import AttendanceIngestionClient, resolve_attendance_api_url
 
 # -----------------------------------------------------------------
 # Absolute paths — derived from this file's location.
@@ -245,6 +246,8 @@ DIAG_COLUMNS = [
     "jpeg_encode_ms", "image_size_bytes", "edge_cloud_agree",
     # --- YuNet cadence gating ---
     "yunet_cadence_skip",  # 1 when detection was reused from cache; 0 otherwise
+    # --- attendance orchestration bridge (D.2B) ---
+    "attendance_sent", "attendance_disposition", "attendance_rtt_ms", "attendance_accepted",
 ]
 
 
@@ -376,6 +379,19 @@ class FinalHybridEdge:
             _cloud_url, _routing_strategy, _force_offload, _force_edge,
         )
 
+        _attendance_url = (
+            settings.ATTENDANCE_API_URL
+            if settings.ATTENDANCE_API_URL
+            else resolve_attendance_api_url()
+        )
+        self.attendance_client = AttendanceIngestionClient(
+            enabled=settings.ATTENDANCE_API_ENABLED,
+            api_url=_attendance_url,
+            camera_id=settings.ATTENDANCE_CAMERA_ID,
+            timeout_s=settings.ATTENDANCE_TIMEOUT_S,
+        )
+        self._attendance_ingest_cooldowns: dict = {}
+
         # ---- Optional minimal runtime stabilizers (pass 9). Each is a
         # ----  no-op at the default setting value so the historic runtime
         # ----  behaviour is preserved exactly. See docs/STABILIZATION_KNOBS.md.
@@ -504,6 +520,37 @@ class FinalHybridEdge:
         return emb / np.linalg.norm(emb)
 
     # ------------------------------------------------------------------
+    def _apply_attendance_diag_defaults(self, dbg: dict) -> None:
+        dbg.setdefault("attendance_sent", 0)
+        dbg.setdefault("attendance_disposition", None)
+        dbg.setdefault("attendance_rtt_ms", None)
+        dbg.setdefault("attendance_accepted", None)
+
+    def _try_emit_attendance(self, dbg: dict, identity: str, confidence: float) -> None:
+        """POST recognition event to attendance backend; never raises."""
+        self._apply_attendance_diag_defaults(dbg)
+        if not self.attendance_client.enabled:
+            dbg["attendance_disposition"] = "disabled"
+            return
+
+        if not identity or identity == "NA":
+            dbg["attendance_disposition"] = "skipped_invalid_identity"
+            return
+
+        now = time.time()
+        if now - self._attendance_ingest_cooldowns.get(identity, 0) < settings.ATTENDANCE_INGEST_COOLDOWN_S:
+            dbg["attendance_disposition"] = "skipped_ingest_cooldown"
+            return
+
+        result = self.attendance_client.emit(
+            gallery_identity=identity,
+            confidence=float(confidence),
+            source="edge_runtime",
+        )
+        self._attendance_ingest_cooldowns[identity] = now
+        dbg.update(result.to_diag_dict())
+
+    # ------------------------------------------------------------------
     def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
         """Draw per-track debug overlay. Caller must gate on ``_show_overlay``."""
         if dbg["decision"] == "NO_MATCH":
@@ -580,6 +627,11 @@ class FinalHybridEdge:
             dbg.get("edge_cloud_agree"),
             # YuNet cadence gating
             int(dbg.get("yunet_cadence_skip", False)),
+            # attendance orchestration bridge
+            dbg.get("attendance_sent"),
+            dbg.get("attendance_disposition"),
+            dbg.get("attendance_rtt_ms"),
+            dbg.get("attendance_accepted"),
         ])
 
     # ------------------------------------------------------------------
@@ -740,6 +792,11 @@ class FinalHybridEdge:
                     "edge_cloud_agree":         None,
                     # YuNet cadence gating
                     "yunet_cadence_skip":       False,
+                    # attendance orchestration bridge
+                    "attendance_sent":          0,
+                    "attendance_disposition":   None,
+                    "attendance_rtt_ms":        None,
+                    "attendance_accepted":      None,
                 }
 
                 try:
@@ -931,9 +988,11 @@ class FinalHybridEdge:
                         _run_len, _persist_ok = self._match_persistence.observe(
                             track_id, identity,
                         )
-                        if _persist_ok and time.time() - self.cooldowns.get(identity, 0) > 300:
-                            self.cooldowns[identity] = time.time()
-                            LOG_RUNTIME.info("Attendance marked: %s", identity)
+                        if _persist_ok:
+                            self._try_emit_attendance(dbg, identity, sim)
+                            if time.time() - self.cooldowns.get(identity, 0) > 300:
+                                self.cooldowns[identity] = time.time()
+                                LOG_RUNTIME.info("Attendance marked: %s", identity)
                     #offloading algorithm
                     elif sim >= th_mid:
                         # Pass-9: reset the match-persistence counter on any
@@ -971,6 +1030,11 @@ class FinalHybridEdge:
                                     identity        = cloud_result.identity
                                     dbg["identity"] = identity
                                     dbg["decision"] = "MATCHED"
+                                    self._try_emit_attendance(
+                                        dbg,
+                                        identity,
+                                        cloud_result.arcface_confidence,
+                                    )
                                     if time.time() - self.cooldowns.get(identity, 0) > 300:
                                         self.cooldowns[identity] = time.time()
                                         LOG_RUNTIME.info("Attendance marked (cloud): %s", identity)

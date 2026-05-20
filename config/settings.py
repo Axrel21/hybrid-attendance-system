@@ -193,6 +193,18 @@ DIAG_LOG_EVERY_N = max(1, int(os.environ.get("DIAG_LOG_EVERY_N", "1")))
 DIAG_MAX_SIZE_MB = 50.0
 
 # =====================================================================
+# Attendance orchestration API (D.2B edge bridge)
+# =====================================================================
+# Posts successful recognition decisions to the cloud attendance backend.
+# URL defaults to {CLOUD_SERVER_URL}/attendance/recognition/events when unset.
+ATTENDANCE_API_ENABLED = _env_truthy("ATTENDANCE_API_ENABLED", "0")
+ATTENDANCE_API_URL = os.environ.get("ATTENDANCE_API_URL", "").strip()
+ATTENDANCE_CAMERA_ID = os.environ.get("ATTENDANCE_CAMERA_ID", "").strip()
+ATTENDANCE_TIMEOUT_S = float(os.environ.get("ATTENDANCE_TIMEOUT_S", "1.0"))
+# Per-identity minimum interval between ingestion POSTs (supports engine accumulation).
+ATTENDANCE_INGEST_COOLDOWN_S = float(os.environ.get("ATTENDANCE_INGEST_COOLDOWN_S", "5.0"))
+
+# =====================================================================
 # Performance instrumentation (Phase 5)
 # =====================================================================
 # Rolling FPS window: number of past frame timestamps to average over.
