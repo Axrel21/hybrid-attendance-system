@@ -1,28 +1,52 @@
-"""Fixed occupancy estimator — OpenCV HOG person detector only."""
+"""Occupancy estimator — YOLOv8n person detector, CPU only (D3 Track 2)."""
 
 from __future__ import annotations
 
-import cv2
+import os
+from typing import Any
+
 import numpy as np
 
-_HOG = cv2.HOGDescriptor()
-_HOG.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+_MODEL: Any | None = None
+_PERSON_CLASS_ID = 0
+_DEFAULT_CONFIDENCE = 0.35
 
-_MIN_DETECTION_WEIGHT = 0.5
+
+def _confidence_threshold() -> float:
+    raw = os.environ.get("SURVEILLANCE_CONFIDENCE", str(_DEFAULT_CONFIDENCE))
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_CONFIDENCE
+
+
+def _get_model() -> Any:
+    global _MODEL
+    if _MODEL is None:
+        from ultralytics import YOLO
+
+        _MODEL = YOLO("yolov8n.pt")
+    return _MODEL
 
 
 def estimate_occupancy(frame: np.ndarray) -> int:
-    """Return a non-negative integer occupancy estimate for the latest frame."""
+    """Return a non-negative integer person count for the latest frame."""
     if frame is None or frame.size == 0:
         return 0
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    _, weights = _HOG.detectMultiScale(
-        gray,
-        winStride=(8, 8),
-        padding=(4, 4),
-        scale=1.05,
+    results = _get_model().predict(
+        frame,
+        conf=_confidence_threshold(),
+        classes=[_PERSON_CLASS_ID],
+        device="cpu",
+        imgsz=320,
+        verbose=False,
     )
+    if not results:
+        return 0
 
-    count = sum(1 for weight in weights if weight >= _MIN_DETECTION_WEIGHT)
-    return max(0, int(count))
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
+        return 0
+
+    return max(0, int(len(boxes)))

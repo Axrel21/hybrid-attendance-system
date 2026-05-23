@@ -1,10 +1,10 @@
 ---
 
-# Validation
+## Validation & Smoke Tests
 
-Before running the live prototype, validate imports and runtime dependencies.
+Run these checks before considering Track 2 complete.
 
-## 1. Compile Check
+### 1. Compile Check
 
 Verify all surveillance modules load correctly.
 
@@ -23,24 +23,20 @@ No errors should appear.
 
 ---
 
-## 2. Occupancy Logic Smoke Test
+### 2. Occupancy Smoke Test
 
-Verify occupancy estimation runs independently of webcam access.
+Verify occupancy estimation works without webcam input.
 
-Run:
+Install surveillance dependencies first (see [Track 2 dependencies](#track-2--occupancy-quality)).
 
 ```bash
 python3 -c "
 from surveillance.occupancy import estimate_occupancy
 import numpy as np
 
-frame = np.zeros((240,320,3),dtype=np.uint8)
+frame = np.zeros((240, 320, 3), dtype=np.uint8)
 
-count = estimate_occupancy(frame)
-
-print('occupancy=', count)
-
-assert count == 0
+assert estimate_occupancy(frame) == 0
 
 print('occupancy_ok')
 "
@@ -49,39 +45,37 @@ print('occupancy_ok')
 Expected:
 
 ```text
-occupancy= 0
 occupancy_ok
 ```
 
-This confirms:
+First run downloads `yolov8n.pt` (~6 MB) and loads the model; subsequent runs reuse the cached weights.
 
-- package imports work
-- OpenCV loads
-- occupancy pipeline executes
-- blank frames produce zero detections
+Confirms:
+
+- imports work
+- YOLOv8n loads lazily on first inference
+- blank frame returns zero person detections
 
 ---
 
-## 3. Runtime Smoke Test
+### 3. Runtime Smoke Test
 
-Launch local surveillance runtime.
+Start surveillance runtime.
 
 ```bash
 python -m surveillance.run
 ```
 
-Expected behavior:
+Expected flow:
 
 ```text
 webcam opens
 
 ↓
 
-live preview visible
+live preview
 
 ↓
-
-overlay updates:
 
 Occupancy: N
 
@@ -91,23 +85,46 @@ press q
 
 ↓
 
-clean exit
+clean shutdown
 ```
 
 Success criteria:
 
+- preview renders
+- occupancy updates when visible people enter or leave frame
 - no crashes
-- occupancy updates continuously
-- camera closes correctly
-- application exits immediately
+- camera releases correctly
+- no backend or attendance traffic
 
 ---
 
-# Troubleshooting
+## Troubleshooting
 
-## Window does not open
+### Import errors
 
-Check OpenCV build:
+Install dependencies:
+
+```bash
+pip install -r surveillance/requirements-surveillance.txt
+```
+
+Run from repository root:
+
+```bash
+python -m surveillance.run
+```
+
+Avoid:
+
+```bash
+python surveillance/run.py
+```
+
+---
+
+### Window does not open
+
+Check OpenCV:
 
 ```bash
 python -c "
@@ -116,13 +133,7 @@ print(cv2.__version__)
 "
 ```
 
-If using:
-
-```text
-opencv-python-headless
-```
-
-remove it:
+If using headless build:
 
 ```bash
 pip uninstall opencv-python-headless
@@ -131,9 +142,7 @@ pip install opencv-python
 
 ---
 
-## Camera cannot be opened
-
-Verify webcam availability.
+### Camera unavailable
 
 Linux:
 
@@ -149,32 +158,106 @@ Expected:
 
 ---
 
-## Import errors
+### Model download fails
 
-Run from repository root only.
-
-Correct:
-
-```bash
-python -m surveillance.run
-```
-
-Avoid:
-
-```bash
-python surveillance/run.py
-```
+Ultralytics downloads `yolov8n.pt` on first inference. Ensure outbound HTTPS is allowed once, or place the file manually where Ultralytics expects it (typically `~/.cache/ultralytics/` or the working directory).
 
 ---
 
-# Exit Criteria (Track 1 Complete)
+## Exit Criteria (Track 1 Complete)
 
-Track 1 is considered complete when all conditions pass:
+Track 1 is complete when:
 
 - compile check passes
 - occupancy smoke test passes
 - runtime launches
 - occupancy overlay updates
 - clean quit works
-- no network requests occur
-- D1 and D2 remain unchanged
+- no network activity occurs (except optional one-time model download for Track 2)
+- D1/D2 remain unchanged
+
+---
+
+## Track 2 — Occupancy Quality
+
+Track 2 replaces OpenCV HOG with **YOLOv8n** inside `occupancy.py` only. Track 1 runtime shape is unchanged: local webcam, scalar overlay, `python -m surveillance.run`, no backend.
+
+### Pipeline
+
+```text
+camera frame
+  → YOLOv8n (class=person, CPU)
+  → count(detections)
+  → overlay
+```
+
+### Dependency changes
+
+Install from repo root:
+
+```bash
+pip install -r surveillance/requirements-surveillance.txt
+```
+
+| Package | Role |
+|---------|------|
+| `ultralytics` | YOLOv8n inference (pulls CPU `torch`) |
+| `opencv-python` | Webcam preview in `run.py` |
+| `numpy` | Frame arrays |
+
+Track 1 HOG required only OpenCV + numpy. Track 2 adds Ultralytics/PyTorch for better seated and partial-body detection.
+
+### Model notes
+
+- Weights: `yolov8n.pt` (nano — smallest YOLOv8 variant).
+- Loaded **lazily** on the first `estimate_occupancy()` call; one process-wide instance.
+- **CPU only** — `device="cpu"`; no GPU required.
+- **Inference size** — `imgsz=320` matches webcam width (320×240 capture); avoids default 640 upscaling and lowers CPU cost.
+- **Person class only** — COCO class `0`; occupancy = detection count.
+- **Confidence** — default `0.35`; override with env `SURVEILLANCE_CONFIDENCE` (float, e.g. `0.25`).
+
+No tracking, identities, zones, or attendance coupling.
+
+### CPU utilization notes
+
+- YOLOv8n on CPU at 320×240 is heavier than Track 1 HOG; expect **moderate to high CPU** (often 40–90% of one core on a laptop, varies by hardware).
+- Preview may run below real-time frame rate; occupancy still updates each processed frame.
+- Lower load: raise `SURVEILLANCE_CONFIDENCE` slightly, close other heavy apps, or use a machine with more CPU headroom.
+- GPU is intentionally not used.
+
+### Rollback instructions
+
+To revert to Track 1 HOG occupancy:
+
+1. Restore `surveillance/occupancy.py` from git before Track 2:
+   ```bash
+   git checkout HEAD -- surveillance/occupancy.py
+   ```
+   (Or restore the HOG version from your Track 1 commit.)
+
+2. Optional — remove Track 2 Python packages:
+   ```bash
+   pip uninstall ultralytics torch torchvision -y
+   ```
+
+3. Re-run compile and smoke tests from the [Track 1](#exit-criteria-track-1-complete) section (OpenCV + numpy only).
+
+`run.py` and `camera.py` are unchanged; rollback is confined to `occupancy.py` and optional deps.
+
+### Track 2 validation
+
+```bash
+python3 -m compileall surveillance
+
+python3 -c "
+from surveillance.occupancy import estimate_occupancy
+import numpy as np
+frame = np.zeros((240, 320, 3), dtype=np.uint8)
+assert estimate_occupancy(frame) == 0
+print('occupancy_ok')
+"
+
+python -m surveillance.run
+```
+
+Live check: seated or partially visible occupants should be detected more reliably than Track 1 HOG.
