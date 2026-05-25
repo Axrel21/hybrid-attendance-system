@@ -2,7 +2,7 @@
 
 ## Validation & Smoke Tests
 
-Run these checks before considering Track 2 complete.
+Run these checks before considering Track 3 complete.
 
 ### 1. Compile Check
 
@@ -23,29 +23,30 @@ No errors should appear.
 
 ---
 
-### 2. Occupancy Smoke Test
+### 2. Tracker Smoke Test
 
-Verify occupancy estimation works without webcam input.
+Verify tracking pipeline runs without webcam input.
 
 Install surveillance dependencies first (see [Track 2 dependencies](#track-2--occupancy-quality)).
 
 ```bash
 python3 -c "
-from surveillance.occupancy import estimate_occupancy
+from surveillance.occupancy import estimate_occupancy, get_active_track_ids
 import numpy as np
 
 frame = np.zeros((240, 320, 3), dtype=np.uint8)
 
 assert estimate_occupancy(frame) == 0
+assert get_active_track_ids() == []
 
-print('occupancy_ok')
+print('tracker_ok')
 "
 ```
 
 Expected:
 
 ```text
-occupancy_ok
+tracker_ok
 ```
 
 First run downloads `yolov8n.pt` (~6 MB) and loads the model; subsequent runs reuse the cached weights.
@@ -53,8 +54,8 @@ First run downloads `yolov8n.pt` (~6 MB) and loads the model; subsequent runs re
 Confirms:
 
 - imports work
-- YOLOv8n loads lazily on first inference
-- blank frame returns zero person detections
+- YOLOv8n + ByteTrack load lazily on first inference
+- blank frame returns zero occupancy and no active track IDs
 
 ---
 
@@ -91,7 +92,9 @@ clean shutdown
 Success criteria:
 
 - preview renders
-- occupancy updates when visible people enter or leave frame
+- bounding boxes and `#<track_id>` labels on visible people
+- `Occupancy: N` matches count of active tracks (not raw detections)
+- track IDs persist while a person stays in frame; removed when they leave
 - no crashes
 - camera releases correctly
 - no backend or attendance traffic
@@ -261,3 +264,92 @@ python -m surveillance.run
 ```
 
 Live check: seated or partially visible occupants should be detected more reliably than Track 1 HOG.
+
+---
+
+## Track 3 — Person Tracking & Presence Persistence
+
+Track 3 adds **ByteTrack** on top of Track 2 YOLOv8n inside `occupancy.py` only. `run.py` and `camera.py` are unchanged.
+
+### Pipeline
+
+```text
+camera frame
+  → YOLOv8n detect (class=person, CPU, imgsz=320)
+  → ByteTrack (persist=True)
+  → unique active track IDs
+  → occupancy = len(active tracks)
+  → overlay (boxes, Track IDs list; run.py adds Occupancy line)
+```
+
+### Rules
+
+| Allowed | Forbidden |
+|---------|-----------|
+| Anonymous numeric track IDs (`#2`, `#5`) | Names, gallery, embeddings |
+| Local runtime persistence (`persist=True`) | Attendance, cloud POST, classroom mapping |
+| Count unique tracks in current frame | Identity, ArcFace, MobileFaceNet |
+
+Track IDs reset on process restart. They are **not** student identities.
+
+### Dependency changes
+
+`lap` is required for ByteTrack inside Ultralytics:
+
+```bash
+pip install -r surveillance/requirements-surveillance.txt
+```
+
+### Expected tracking behavior
+
+1. **Person enters frame** — YOLO detects person; ByteTrack assigns a new numeric ID (e.g. `#3`).
+2. **Person remains visible** — same ID persists across frames (e.g. frame 1 and frame 40 both show `#3`).
+3. **Second person enters** — second ID (e.g. `#8`); occupancy becomes `2`.
+4. **Person leaves frame** — their track drops from active set; occupancy decreases after ByteTrack drops the track.
+5. **Runtime restart** — all IDs reset; numbering may differ from previous session.
+
+Overlay (drawn in `occupancy.py` on the frame; `run.py` still draws `Occupancy: N` at the top):
+
+```text
+Occupancy: 3
+
+Track IDs:
+#2
+#5
+#11
+```
+
+Plus orange boxes with `#<id>` on each person.
+
+### CPU utilization notes
+
+- ByteTrack adds modest CPU on top of YOLOv8n inference (association is lightweight vs detection).
+- Expect similar range to Track 2: **moderate to high CPU** on one core at 320×240.
+- Preview may remain below real-time; tracking still advances each processed frame.
+
+### Rollback instructions
+
+To revert to Track 2 (detection count only, no tracking):
+
+1. Restore Track 2 `surveillance/occupancy.py` from git.
+2. Optional: `pip uninstall lap -y` if not needed elsewhere.
+3. Re-run [Track 2 validation](#track-2-validation).
+
+### Track 3 validation
+
+```bash
+python3 -m compileall surveillance
+
+python3 -c "
+from surveillance.occupancy import estimate_occupancy, get_active_track_ids
+import numpy as np
+frame = np.zeros((240, 320, 3), dtype=np.uint8)
+assert estimate_occupancy(frame) == 0
+assert get_active_track_ids() == []
+print('tracker_ok')
+"
+
+python -m surveillance.run
+```
+
+Live check: stand in frame — note your track ID; move slightly — ID unchanged; step out — ID removed from list and occupancy drops.
