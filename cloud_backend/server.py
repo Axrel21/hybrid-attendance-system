@@ -85,6 +85,7 @@ from cloud_backend.api.recognition import router as recognition_router  # noqa: 
 from cloud_backend.attendance.presence_api import router as presence_router  # noqa: E402
 from cloud_backend.attendance.evidence_api import router as evidence_router  # noqa: E402
 from cloud_backend.attendance.eligibility_api import router as eligibility_router  # noqa: E402
+from cloud_backend.attendance.decision_api import router as decision_router  # noqa: E402
 from cloud_backend.dashboard import websocket as ws_module  # noqa: E402
 from cloud_backend.dashboard.attendance_ui import (  # noqa: E402
     register_static_mount,
@@ -102,6 +103,7 @@ app.include_router(recognition_router)
 app.include_router(presence_router)
 app.include_router(evidence_router)
 app.include_router(eligibility_router)
+app.include_router(decision_router)
 ws_module.register(app)
 
 

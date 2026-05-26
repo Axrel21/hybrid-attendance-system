@@ -740,3 +740,37 @@ curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
 Expected `presence_observed` record includes `time_delta_sec` and temporal `confidence` (`high` when recognition is within 30s of `first_seen`).
 
 **Rollback:** remove `temporal_scorer.py` and revert temporal fields from `evidence_service.py` / `schemas/evidence.py`.
+
+---
+
+## D5 Track 1 — Attendance Decisions (cloud)
+
+Read-only decision layer over eligibility + evidence confidence. **Does not** call `AttendanceEngine` or write attendance records.
+
+### Decision rules
+
+| Eligibility | Confidence | Decision | Reason |
+|-------------|------------|----------|--------|
+| `eligible` | `high` | `present` | `eligible_high_confidence` |
+| `eligible` | `medium` | `present` | `eligible_medium_confidence` |
+| `eligible` | `low` | `manual_review` | `eligible_low_confidence` |
+| `insufficient_presence` | * | `absent` | `insufficient_presence` |
+| `unknown` | * | `manual_review` | `unknown_eligibility` |
+
+### API
+
+```bash
+curl -s http://localhost:8000/attendance/decisions | python3 -m json.tool
+curl -s http://localhost:8000/attendance/decisions/{lecture_id} | python3 -m json.tool
+```
+
+### D5 Track 1 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+
+curl -s http://localhost:8000/attendance/eligibility | python3 -m json.tool
+curl -s http://localhost:8000/attendance/decisions | python3 -m json.tool
+```
+
+**Rollback:** remove `decision_router` from `cloud_backend/server.py` and delete `decision_*.py` + `schemas/decision.py`.
