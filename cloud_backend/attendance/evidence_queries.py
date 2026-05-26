@@ -8,9 +8,13 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import os
+
 from cloud_backend.models.camera_source import CameraSource
+from cloud_backend.models.lecture import Lecture
 from cloud_backend.models.recognition_event_log import RecognitionEventLog
 from cloud_backend.models.student import Student
+from cloud_backend.attendance.presence_timeline import PresenceSession
 
 
 async def fetch_recognition_logs_for_evidence(
@@ -37,6 +41,10 @@ async def resolve_classroom_id_for_log(
 ) -> uuid.UUID | None:
     if entry.classroom_id is not None:
         return entry.classroom_id
+    if entry.lecture_id is not None:
+        lecture = await session.get(Lecture, entry.lecture_id)
+        if lecture is not None:
+            return lecture.classroom_id
     if not entry.camera_id:
         return None
     stmt = select(CameraSource).where(CameraSource.camera_id == entry.camera_id)
@@ -45,6 +53,59 @@ async def resolve_classroom_id_for_log(
     if source is None:
         return None
     return source.classroom_id
+
+
+def surveillance_camera_ids_for_classroom(
+    classroom_id: uuid.UUID,
+    surv_by_classroom: dict[uuid.UUID, list[str]],
+    presence_sessions: list[PresenceSession],
+) -> list[str]:
+    """Registry cameras first; optional fallback to live presence camera_ids."""
+    registered = list(surv_by_classroom.get(classroom_id, []))
+    if registered:
+        return registered
+
+    if os.environ.get("EVIDENCE_PRESENCE_CAMERA_FALLBACK", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        return []
+
+    explicit = os.environ.get("EVIDENCE_SURVEILLANCE_CAMERA_IDS", "").strip()
+    if explicit:
+        return [camera.strip() for camera in explicit.split(",") if camera.strip()]
+
+    return list(
+        {
+            session.camera_id
+            for session in presence_sessions
+            if session.track_id > 0 and session.camera_id
+        }
+    )
+
+
+def matching_presence_sessions(
+    classroom_id: uuid.UUID,
+    surv_by_classroom: dict[uuid.UUID, list[str]],
+    presence_sessions: list[PresenceSession],
+) -> list[PresenceSession]:
+    camera_ids = set(
+        surveillance_camera_ids_for_classroom(
+            classroom_id,
+            surv_by_classroom,
+            presence_sessions,
+        )
+    )
+    if not camera_ids:
+        return []
+
+    return [
+        session
+        for session in presence_sessions
+        if session.track_id > 0 and session.camera_id in camera_ids
+    ]
 
 
 async def resolve_student_id(

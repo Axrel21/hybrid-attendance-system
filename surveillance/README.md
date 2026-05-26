@@ -615,3 +615,128 @@ curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
 ```
 
 **Rollback:** remove `evidence_router` from `cloud_backend/server.py` and delete `evidence_*.py` under `cloud_backend/attendance/`.
+
+---
+
+## D4 Track 2 — Attendance Eligibility (cloud)
+
+Read-only advisory from evidence + presence session duration vs lecture duration. **No** `AttendanceEngine`, state transitions, or attendance confirmation.
+
+### Formula
+
+```text
+presence_ratio = presence_duration_sec / lecture_duration_sec
+```
+
+Default threshold: `ATTENDANCE_ELIGIBILITY_THRESHOLD=0.80`
+
+| `decision` | Condition |
+|------------|-----------|
+| `eligible` | `presence_observed` and ratio ≥ threshold (e.g. 52/60) |
+| `insufficient_presence` | `presence_observed` and ratio < threshold (e.g. 20/60) |
+| `unknown` | `recognized_only` or missing lecture span |
+
+### API
+
+```bash
+curl -s http://localhost:8000/attendance/eligibility | python3 -m json.tool
+curl -s http://localhost:8000/attendance/eligibility/{lecture_id} | python3 -m json.tool
+```
+
+### D4 Track 2 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+
+curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
+curl -s http://localhost:8000/attendance/eligibility | python3 -m json.tool
+```
+
+**Edge cases:** no lecture_id → `unknown`; lecture duration 0 → `unknown`; no presence sessions → `recognized_only` evidence → `unknown`.
+
+**Rollback:** remove `eligibility_router` from `cloud_backend/server.py` and delete `eligibility_*.py` + `schemas/eligibility.py`.
+
+---
+
+## D4 Track 3 — Strengthened Evidence Correlation
+
+Classroom-level correlation now:
+
+1. Resolves classroom from recognition log, lecture, or entry camera registry
+2. Finds surveillance cameras for that classroom (registry `role=surveillance` or `surv_*` prefix)
+3. Falls back to live presence `camera_id` values when registry is empty (`EVIDENCE_PRESENCE_CAMERA_FALLBACK=1`, default)
+4. Picks the **strongest** presence session (overlap → active → longest `duration_sec`)
+5. Emits `presence_observed` with `presence_duration_sec` populated
+
+Optional env:
+
+```bash
+export EVIDENCE_SURVEILLANCE_CAMERA_IDS=surveillance-laptop-01
+```
+
+### D4 Track 3 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+
+# Create presence session
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 7,
+    "event": "appeared",
+    "timestamp_ms": 1716470700000,
+    "occupancy": 1
+  }'
+
+curl -s http://localhost:8000/presence/sessions | python3 -m json.tool
+curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
+curl -s http://localhost:8000/attendance/eligibility | python3 -m json.tool
+```
+
+Expected evidence: `presence_observed`, non-zero `presence_duration_sec`. Expected eligibility: `presence_ratio` > 0 when lecture duration is set.
+
+**Rollback:** revert `evidence_service.py`, `evidence_queries.py`, and `schemas/evidence.py` to Track 1 versions.
+
+---
+
+## D4 Track 4 — Temporal Evidence Scoring
+
+Adds `TemporalEvidenceScorer` to the existing evidence pipeline. Does not reject evidence; only adjusts `confidence` and exposes `time_delta_sec`.
+
+### Scoring
+
+```text
+time_delta_sec = |recognized_at - presence.first_seen| / 1000
+```
+
+| `time_delta_sec` | `confidence` |
+|------------------|--------------|
+| ≤ 30 | `high` |
+| ≤ 120 | `medium` |
+| > 120 | `low` |
+
+Correlation window (session pick): `EVIDENCE_TEMPORAL_WINDOW_SEC` (default **300**). Prefers presence sessions whose span overlaps recognition ± window.
+
+### D4 Track 4 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 7,
+    "event": "appeared",
+    "timestamp_ms": 1716470700000,
+    "occupancy": 1
+  }'
+
+curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
+```
+
+Expected `presence_observed` record includes `time_delta_sec` and temporal `confidence` (`high` when recognition is within 30s of `first_seen`).
+
+**Rollback:** remove `temporal_scorer.py` and revert temporal fields from `evidence_service.py` / `schemas/evidence.py`.

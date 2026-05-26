@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud_backend.attendance.eligibility_queries import fetch_lecture, lecture_duration_sec
 from cloud_backend.attendance.evidence_service import get_evidence_service
-from cloud_backend.attendance.presence_timeline import get_timeline_service
 from cloud_backend.attendance.schemas.eligibility import AttendanceEligibilityRecord
 from cloud_backend.attendance.schemas.evidence import AttendanceEvidenceRecord
 
@@ -42,9 +41,6 @@ class AttendanceEligibilityService:
             lecture_id=lecture_id,
             limit=limit,
         )
-        sessions_by_key = {
-            (s.camera_id, s.track_id): s for s in get_timeline_service().list_sessions()
-        }
 
         grouped: dict[tuple[str, str | None], list[AttendanceEvidenceRecord]] = defaultdict(list)
         for record in evidence_records:
@@ -58,7 +54,6 @@ class AttendanceEligibilityService:
                     student_id=student_id,
                     lecture_id=lecture_key,
                     evidence_records=records,
-                    sessions_by_key=sessions_by_key,
                 )
             )
 
@@ -77,7 +72,6 @@ class AttendanceEligibilityService:
         student_id: str,
         lecture_id: str | None,
         evidence_records: list[AttendanceEvidenceRecord],
-        sessions_by_key: dict,
     ) -> AttendanceEligibilityRecord:
         lecture_duration = 0
         if lecture_id:
@@ -98,13 +92,7 @@ class AttendanceEligibilityService:
 
         presence_duration = 0
         for record in presence_records:
-            if record.presence_camera_id is None or record.presence_track_id is None:
-                continue
-            session_match = sessions_by_key.get(
-                (record.presence_camera_id, record.presence_track_id)
-            )
-            if session_match is not None:
-                presence_duration = max(presence_duration, session_match.duration_sec)
+            presence_duration = max(presence_duration, record.presence_duration_sec)
 
         if lecture_duration <= 0:
             return AttendanceEligibilityRecord(

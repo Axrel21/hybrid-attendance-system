@@ -22,6 +22,16 @@ class AttendanceEvidenceRecord(BaseModel):
     classroom_id: str | None = None
     presence_camera_id: str | None = None
     presence_track_id: int | None = None
+    presence_duration_sec: int = Field(
+        default=0,
+        ge=0,
+        description="Strongest matched presence session duration (classroom-level)",
+    )
+    time_delta_sec: int | None = Field(
+        default=None,
+        ge=0,
+        description="Seconds from recognition to presence appearance (first_seen)",
+    )
 
 
 class AttendanceEvidenceListResponse(BaseModel):
