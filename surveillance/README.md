@@ -581,3 +581,37 @@ Remove timeline wiring from `presence_handler.py` and delete or bypass `presence
 | `cloud_backend/attendance/schemas/presence.py` | Session response models |
 
 Surveillance runtime (`run.py`, `occupancy.py`) unchanged.
+
+---
+
+## D4 Track 1 — Attendance Evidence (cloud)
+
+Correlation lives in `cloud_backend/attendance/` only. Combines recognition log rows with in-memory presence sessions into **evidence** (not final attendance).
+
+### API
+
+```bash
+curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
+curl -s http://localhost:8000/attendance/evidence/{lecture_id} | python3 -m json.tool
+```
+
+### Evidence rules
+
+| Condition | `evidence` | `confidence` |
+|-----------|------------|--------------|
+| Recognition + presence session in same classroom (surveillance cameras) | `presence_observed` | `medium` / `high` |
+| Recognition, no presence | `recognized_only` | `low` |
+| Invalid / empty identity | `unknown` | `low` |
+
+Register surveillance cameras in `camera_sources` with `meta_json` `{"role":"surveillance"}` or `surv_*` camera_id prefix.
+
+### D4 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+
+# POST presence + ensure recognition logs exist, then:
+curl -s http://localhost:8000/attendance/evidence | python3 -m json.tool
+```
+
+**Rollback:** remove `evidence_router` from `cloud_backend/server.py` and delete `evidence_*.py` under `cloud_backend/attendance/`.
