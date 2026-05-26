@@ -353,3 +353,106 @@ python -m surveillance.run
 ```
 
 Live check: stand in frame — note your track ID; move slightly — ID unchanged; step out — ID removed from list and occupancy drops.
+
+---
+
+## Track 4 — Cloud Presence Transport
+
+Track 4 adds **SurveillancePresenceClient** and **PresenceSync** so anonymous presence events reach the cloud. No attendance, identity, or classroom logic.
+
+### Pipeline
+
+```text
+camera → YOLO → ByteTrack → presence sync → POST /presence/events → in-memory log
+```
+
+`run.py` calls `presence.observe()` after each frame. Overlay and tracking behavior from Track 3 are unchanged.
+
+### Wire contract
+
+`POST /presence/events`
+
+```json
+{
+  "camera_id": "surveillance-laptop-01",
+  "track_id": 3,
+  "event": "appeared",
+  "timestamp_ms": 1716470400000,
+  "occupancy": 2
+}
+```
+
+Events: `appeared`, `disappeared`, `heartbeat` (heartbeat uses `track_id: 0`).
+
+Backend logs `presence event received` and stores events in memory only — **does not** call `AttendanceEngine`.
+
+### Environment
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SURVEILLANCE_PRESENCE_ENABLED` | `1` | Set `0` to disable POST |
+| `SURVEILLANCE_PRESENCE_API_URL` | `{CLOUD_SERVER_URL}/presence/events` | Full POST URL |
+| `SURVEILLANCE_CAMERA_ID` | `surveillance-laptop-01` | Camera label |
+| `SURVEILLANCE_PRESENCE_TIMEOUT_S` | `1.0` | HTTP timeout |
+| `SURVEILLANCE_PRESENCE_BATCH_SIZE` | `0` | `0` = immediate; `N>1` = batch N then flush |
+| `SURVEILLANCE_HEARTBEAT_S` | `30` | Heartbeat interval |
+| `CLOUD_SERVER_URL` | `http://localhost:8000` | Base when API URL unset |
+
+### Dependency changes
+
+```bash
+pip install -r surveillance/requirements-surveillance.txt
+```
+
+Adds `requests` for HTTP transport.
+
+Composite backend must mount `presence_router` (included in `cloud_backend/server.py`).
+
+### Track 4 validation
+
+**1. Compile check**
+
+```bash
+python3 -m compileall surveillance cloud_backend/attendance
+```
+
+**2. Local POST smoke test** (backend running on port 8000)
+
+```bash
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 3,
+    "event": "appeared",
+    "timestamp_ms": 1716470400000,
+    "occupancy": 1
+  }'
+```
+
+Expected JSON includes `"accepted": true` and `"message": "presence event received"`. Backend log line: `presence event received`.
+
+**3. Runtime command**
+
+```bash
+# Terminal 1 — backend
+bash deployment/cloud/run_backend.sh --host 0.0.0.0 --port 8000
+
+# Terminal 2 — surveillance
+export CLOUD_SERVER_URL=http://localhost:8000
+python -m surveillance.run
+```
+
+**4. Failure behavior**
+
+- Backend down / timeout / connection refused: warning logged; preview loop continues.
+- `SURVEILLANCE_PRESENCE_ENABLED=0`: no HTTP traffic.
+- Client **never raises** into the runtime loop.
+
+**5. Rollback**
+
+1. Set `SURVEILLANCE_PRESENCE_ENABLED=0`, or restore Track 3 `surveillance/run.py` (no presence imports).
+2. Remove `app.include_router(presence_router)` from `cloud_backend/server.py` if reverting backend route.
+3. Optional: `pip uninstall requests -y` if unused elsewhere.
+
+Track 3 tracking-only behavior remains if presence is disabled without code rollback.
