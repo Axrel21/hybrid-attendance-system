@@ -30,3 +30,24 @@ class PresenceEventResult(BaseModel):
     track_id: int
     event: str
     occupancy: int
+
+
+PresenceSessionStatus = Literal["active", "inactive"]
+
+
+class PresenceSessionResponse(BaseModel):
+    """Anonymous track session derived from presence events."""
+
+    camera_id: str
+    track_id: int
+    first_seen: int = Field(..., description="First seen wall-clock ms")
+    last_seen: int = Field(..., description="Last seen wall-clock ms")
+    duration_sec: int = Field(..., ge=0)
+    status: PresenceSessionStatus
+
+
+class PresenceSessionListResponse(BaseModel):
+    """Response from GET /presence/sessions."""
+
+    total: int = Field(..., ge=0)
+    sessions: list[PresenceSessionResponse]

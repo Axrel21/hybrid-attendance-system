@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from cloud_backend.attendance.presence_store import get_presence_store
+from cloud_backend.attendance.presence_timeline import get_timeline_service
 from cloud_backend.attendance.schemas.presence import PresenceEvent, PresenceEventResult
 
 log = logging.getLogger("cloud_backend.attendance.presence")
@@ -22,6 +23,12 @@ class PresenceEventHandler:
             "occupancy": payload.occupancy,
         }
         get_presence_store().append(entry)
+        get_timeline_service().on_event(
+            camera_id=payload.camera_id,
+            track_id=payload.track_id,
+            event=payload.event,
+            timestamp_ms=payload.timestamp_ms,
+        )
         log.info(
             "presence event received camera_id=%s track_id=%s event=%s occupancy=%s",
             payload.camera_id,

@@ -456,3 +456,128 @@ python -m surveillance.run
 3. Optional: `pip uninstall requests -y` if unused elsewhere.
 
 Track 3 tracking-only behavior remains if presence is disabled without code rollback.
+
+---
+
+## Track 5 — Presence Timeline Aggregation
+
+Track 5 adds **PresenceTimelineService** on the cloud side. Raw events from Track 4 are aggregated into anonymous **presence sessions** (in-memory only). No DB, identity, classroom logic, or `AttendanceEngine` calls.
+
+### Pipeline
+
+```text
+POST /presence/events → event log + PresenceTimelineService
+GET  /presence/sessions → { total, sessions[] }
+```
+
+### Session rules
+
+| Event | Effect |
+|-------|--------|
+| `appeared` (track_id > 0) | Create active session (`first_seen`, `last_seen`) |
+| `heartbeat` | Refresh `last_seen` for all **active** sessions on that `camera_id` |
+| `disappeared` | Set `inactive`, update `last_seen` |
+| Timeout | If `last_seen` older than `PRESENCE_SESSION_TIMEOUT_S` (default 45s), mark `inactive` on ingest or GET |
+
+`duration_sec = (last_seen - first_seen) // 1000`. Track IDs stay anonymous.
+
+### Read API
+
+```bash
+curl -s http://localhost:8000/presence/sessions
+curl -s http://localhost:8000/presence/sessions/surveillance-laptop-01
+```
+
+Example session:
+
+```json
+{
+  "camera_id": "surveillance-laptop-01",
+  "track_id": 7,
+  "first_seen": 1716470700000,
+  "last_seen": 1716473280000,
+  "duration_sec": 2580,
+  "status": "inactive"
+}
+```
+
+Convert `first_seen` / `last_seen` ms to local time for display (e.g. 09:05 / 09:48).
+
+### Track 5 validation
+
+**1. Compile check**
+
+```bash
+python3 -m compileall cloud_backend/attendance
+```
+
+**2. Local POST test** (create session)
+
+```bash
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 7,
+    "event": "appeared",
+    "timestamp_ms": 1716470700000,
+    "occupancy": 1
+  }'
+```
+
+**3. Session query test**
+
+```bash
+curl -s http://localhost:8000/presence/sessions | python3 -m json.tool
+```
+
+Expected: `total` ≥ 1, session with `track_id: 7`, `status: "active"`, `duration_sec` ≥ 0.
+
+Advance timeline:
+
+```bash
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 7,
+    "event": "heartbeat",
+    "timestamp_ms": 1716471900000,
+    "occupancy": 1
+  }'
+
+curl -s http://localhost:8000/presence/sessions/surveillance-laptop-01 | python3 -m json.tool
+```
+
+Expected: `last_seen` updated, `duration_sec` increased.
+
+**4. Timeout behavior**
+
+POST `disappeared` or wait longer than `PRESENCE_SESSION_TIMEOUT_S` without heartbeat, then GET sessions — `status` should be `inactive`.
+
+```bash
+curl -s -X POST http://localhost:8000/presence/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "camera_id": "surveillance-laptop-01",
+    "track_id": 7,
+    "event": "disappeared",
+    "timestamp_ms": 1716473280000,
+    "occupancy": 0
+  }'
+```
+
+**5. Rollback**
+
+Remove timeline wiring from `presence_handler.py` and delete or bypass `presence_timeline.py` / GET routes in `presence_api.py`. Track 4 event POST and raw event store continue to work.
+
+### Files (Track 5)
+
+| File | Role |
+|------|------|
+| `cloud_backend/attendance/presence_timeline.py` | `PresenceTimelineService` |
+| `cloud_backend/attendance/presence_handler.py` | Feeds timeline on ingest |
+| `cloud_backend/attendance/presence_api.py` | GET `/presence/sessions` |
+| `cloud_backend/attendance/schemas/presence.py` | Session response models |
+
+Surveillance runtime (`run.py`, `occupancy.py`) unchanged.
