@@ -1,0 +1,8 @@
+# Backward-compatible entry point — canonical pins live in edge/requirements-edge.txt
+#
+#   pip install -r requirements_pi.txt
+#
+# Equivalent to:
+#   pip install -r edge/requirements-edge.txt
+
+-r edge/requirements-edge.txt

@@ -20,7 +20,7 @@ class HybridTracker:
         self.max_disappeared = max_disappeared
 
     def update(self, rects):
-        if len(rects) == 0:
+        if len(rects) == 0: 
             for obj_id in list(self.disappeared.keys()):
                 self.disappeared[obj_id] += 1
                 if self.disappeared[obj_id] > self.max_disappeared:
@@ -49,7 +49,7 @@ class HybridTracker:
             for (row, col) in zip(rows, cols):
                 if row in used_rows or col in used_cols: continue
                 # IoU sanity check to prevent wild jumps
-                if bb_iou(self.objects[object_ids[row]][1], rects[col]) < 0.1 and D[row, col] > 100:
+                if bb_iou(self.objects[object_ids[row]][1], rects[col]) < 0.3 or D[row, col] > 80:
                     continue
                 
                 object_id = object_ids[row]

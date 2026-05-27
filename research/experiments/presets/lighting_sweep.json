@@ -1,0 +1,23 @@
+{
+  "preset": "lighting_sweep",
+  "preset_version": "1.0",
+  "description": "Multiple captures under different lighting conditions: bright, normal, dim, backlit. One run per lighting; switch lights / curtains between runs.",
+  "sweep_dimension": "lighting",
+  "sweep_values": ["bright", "normal", "dim", "backlit"],
+  "recommended_duration_s": 90,
+  "fixed_protocol": {
+    "attack_type": "none",
+    "distance_m": 2.0,
+    "orientation": "frontal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {},
+  "analysis_pipeline": [
+    "stabilization",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "stabilization.blur_geometry_quality.blur.p50",
+  "notes": "Tag each session with --lighting matching the sweep_value. The low_light and excessive_blur quality tags should track the lighting class; the aggregator surfaces per-class blur and sim distributions."
+}

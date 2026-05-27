@@ -1,0 +1,23 @@
+{
+  "preset": "pad_attack_sweep",
+  "preset_version": "1.0",
+  "description": "Multiple captures across attack types: none (genuine baseline), print photo, screen replay, video replay, paper mask. One run per attack; subject swaps the spoof artefact between runs.",
+  "sweep_dimension": "attack_type",
+  "sweep_values": ["none", "print", "screen_replay", "video_replay", "mask_paper"],
+  "recommended_duration_s": 120,
+  "fixed_protocol": {
+    "distance_m": 1.5,
+    "lighting": "normal",
+    "orientation": "frontal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {},
+  "analysis_pipeline": [
+    "stabilization",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "stabilization.pad_temporal.overall.spoof_fraction",
+  "notes": "Tag each session with --attack-type matching the sweep_value. Genuine baseline (attack_type=none) anchors the PAD-true-negative rate. Aggregator emits a confusion-matrix-shaped table per attack class."
+}

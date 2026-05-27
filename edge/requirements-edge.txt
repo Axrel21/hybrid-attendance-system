@@ -1,0 +1,41 @@
+# Raspberry Pi / edge device — Python dependencies (ARM64-friendly)
+# Target: Raspberry Pi OS Bookworm 64-bit (aarch64), Python 3.10+
+# Conda / Miniforge workflows: create env, then:
+#   pip install -r edge/requirements-edge.txt
+# Plain venv:
+#   pip install -r edge/requirements-edge.txt
+#
+# Do NOT mix with cloud/requirements.txt (InsightFace stack is x86/GPU-oriented).
+
+# --- Inference (replaces tensorflow-cpu which has no ARM64 PyPI wheel) ---
+tflite-runtime>=2.13.0
+
+# --- Computer Vision ---
+# GUI mode (HEADLESS=0, native cv2.imshow): use opencv-python and system GTK — see
+#   deployment/pi/OPENCV_GUI_RASPBERRY_PI.md
+# Headless-only: opencv-python-headless is fine.
+# Pick ONE:
+opencv-python-headless==4.8.0.76
+# opencv-python==4.8.0.76
+
+# --- Optional: remote MJPEG (STREAM_VIDEO=1) ---
+# flask>=2.3.0
+
+# --- Numerical ---
+numpy>=1.24.3
+
+# --- Tracker ---
+scipy==1.10.1
+
+# --- Camera ---
+# Picamera2 supports Pi Camera Module 2 via the libcamera stack on
+# Bullseye and Bookworm. With CAMERA_BACKEND=opencv the V4L2 path is
+# used instead; Picamera2 is still imported lazily so it must be present.
+picamera2>=0.3.12
+
+# --- Post-run analysis (optional on device; heavy) ---
+pandas>=2.0.0
+matplotlib>=3.7.0
+
+requests>=2.31.0
+urllib3>=2.0.0

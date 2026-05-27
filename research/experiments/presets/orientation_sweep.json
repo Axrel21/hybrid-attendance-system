@@ -1,0 +1,23 @@
+{
+  "preset": "orientation_sweep",
+  "preset_version": "1.0",
+  "description": "Multiple captures across orientation classes — frontal, tilted, overhead. One run per orientation; subject re-positions between runs. Compare per-mode sim distributions.",
+  "sweep_dimension": "orientation",
+  "sweep_values": ["frontal", "tilted", "overhead"],
+  "recommended_duration_s": 120,
+  "fixed_protocol": {
+    "attack_type": "none",
+    "distance_m": 2.0,
+    "lighting": "normal",
+    "mounting": "tripod_eye_level",
+    "movement": "static"
+  },
+  "fixed_env": {},
+  "analysis_pipeline": [
+    "stabilization",
+    "runtime_diagnostics",
+    "quality_gates"
+  ],
+  "comparison_metric": "runtime_diagnostics.orientation_vs_confidence.per_mode[].sim_mean",
+  "notes": "Run sequentially: frontal -> tilted -> overhead. Tag each session with --orientation matching the sweep_value. The aggregator joins sessions by protocol.orientation and emits a per-mode sim table."
+}

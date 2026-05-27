@@ -1,0 +1,442 @@
+# Validation checklists (post-refactor)
+
+Run from **repository root** with the appropriate venv/Conda env activated.
+
+## 1. Imports compile
+
+```bash
+python -m compileall -q config edge cloud research experiments run.py preprocess_dataset.py
+```
+
+## 2. Edge runtime launches
+
+```bash
+# Smoke: may exit quickly if no camera — goal is no ImportError
+python -c "from edge.main import FinalHybridEdge; print('edge import OK')"
+python -c "import run; print('run.py import OK')"
+```
+
+Full run: `python run.py` (requires camera/models).
+
+## 3. Cloud runtime launches
+
+```bash
+cd cloud
+python -c "from gallery import FaceGallery; from arcface_verifier import ArcFaceVerifier"
+```
+
+Full run: `uvicorn main:app --host 127.0.0.1 --port 8000` (needs deps + optional empty `gallery/`).
+
+## 4. Telemetry CSVs
+
+- Run a short `run.py` session with `TELEMETRY=1`.
+- Confirm under `experiments/exp_*/telemetry/telemetry_log.csv` and `.../diagnostics/diagnostic_log.csv` with expected headers (schema rotation should not trigger on clean session).
+
+## 5. Experiment reports
+
+- With `AUTO_EXPERIMENT_REPORT=1` and pandas+matplotlib installed, stop pipeline normally; check `experiments/exp_*/plots/` and `summaries/`.
+
+## 6. Plots / analysis
+
+```bash
+python analyze_orientation.py --help
+python analyze_pi_perf.py --help
+python -m research.analysis.liveness_diag_print --help
+```
+
+## 7. Routing telemetry
+
+- In diagnostic CSV, rows with `decision=OFFLOAD_TO_CLOUD` should appear when mid-threshold matches occur and router permits offload (env-dependent).
+
+## 8. Offload telemetry
+
+- Columns `cloud_outcome`, `cloud_rtt_ms`, `jpeg_encode_ms`, etc. populated when cloud is reachable.
+
+## 9. Cloud verification
+
+- With server up: set `CLOUD_SERVER_URL` on edge; trigger mid-confidence face; HTTP 200 from `/verify/image` and non-null `cloud_rtt_ms` in diagnostics.
+
+## 10. Experiment session tracking
+
+- After `run.py`, `EXPERIMENT_ROOT` and `experiments/exp_*` exist; `config/settings_snapshot.json` written.
+
+## Reporting validation
+
+- Same as §5–6; `edge/experiment_report.py` unchanged in behavior.
+- Orientation launcher: `python -m experiments.run_orientation_experiment --help`
+
+## 11. Second-pass artifacts
+
+- Selective deploy dry-runs (no destination side-effects):
+
+```bash
+bash deployment/pi/deploy_pi.sh user@pi:~/attendance/
+bash deployment/cloud/deploy_cloud.sh user@server:~/arcface_server/
+```
+
+- Legacy alias still resolves to the edge stack:
+
+```bash
+pip install --dry-run -r requirments.txt   # expands to edge/requirements-edge.txt
+```
+
+- Session index appears after a short `run.py` smoke session:
+
+```bash
+ls experiments/index.jsonl
+tail -n 1 experiments/index.jsonl   # one JSON line per run
+```
+
+- Edge import smoke test still includes the new path:
+
+```bash
+python -c "from config.experiment_session import _append_session_index, init_experiment_session"
+```
+
+## 12. Third-pass artifacts
+
+- `shared/` is importable without the edge runtime stack installed:
+
+```bash
+python -c "
+import shared
+from shared import (
+    VERIFY_IMAGE_PATH, METADATA_FIELDS, VERIFICATION_RESPONSE_FIELDS,
+    ARCFACE_EMBEDDING_DIM, DEFAULT_JPEG_QUALITY, ATTENDANCE_CSV_COLUMNS,
+    EXPERIMENT_INDEX_FIELDS,
+)
+assert ARCFACE_EMBEDDING_DIM == 512
+print('shared OK')
+"
+```
+
+- Lazy CSV schema access fails cleanly when edge runtime deps are
+  missing, succeeds when they are installed:
+
+```bash
+python -c "
+from shared.schemas import get_diag_columns, get_telemetry_csv_columns
+try:
+    cols = get_diag_columns()
+    print('DIAG cols:', len(cols))
+except ImportError as exc:
+    print('expected on hosts without cv2/tflite:', exc)
+"
+```
+
+- Manifest sanity check (CI-safe, dry-runs only):
+
+```bash
+bash deployment/common/verify_manifests.sh
+```
+
+- Tarball builds:
+
+```bash
+bash deployment/common/package_pi.sh /tmp/_dist
+bash deployment/common/package_cloud.sh /tmp/_dist
+tar -tzf /tmp/_dist/attendance_pi_*.tar.gz | head
+tar -tzf /tmp/_dist/arcface_server_*.tar.gz | head
+```
+
+## 13. System completion phase artifacts
+
+- Composite backend launches (requires `cloud/requirements.txt`
+  installed):
+
+```bash
+# Bare verification (legacy)
+cd cloud && uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Composite (verification + telemetry + dashboard + WS)
+bash deployment/cloud/run_backend.sh --host 0.0.0.0 --port 8000
+```
+
+- Sanity GET after composite launch:
+
+```bash
+curl -s http://localhost:8000/backend/info | python3 -m json.tool
+curl -s http://localhost:8000/telemetry/healthz | python3 -m json.tool
+curl -s http://localhost:8000/api/sessions | python3 -m json.tool
+```
+
+- Edge uploader dry-run against an existing session directory:
+
+```bash
+python3 -m edge.telemetry_uploader \
+    --session experiments/exp_<id>/ \
+    --cloud http://localhost:8000 --dry-run
+```
+
+- End-to-end uploader (real POST):
+
+```bash
+python3 -m edge.telemetry_uploader \
+    --session experiments/exp_<id>/ \
+    --cloud http://localhost:8000
+ls cloud_storage/sessions/exp_<id>/   # metadata.json events.jsonl summary.json
+```
+
+- WebSocket smoke (requires `websocat` or similar):
+
+```bash
+websocat ws://localhost:8000/ws/telemetry
+# expect: {"type":"hello","session_filter":null,...}
+# subsequent /telemetry/ingest POSTs should produce telemetry_batch frames
+```
+
+- Storage and analytics smoke (numpy only — no fastapi required):
+
+```bash
+python3 -c "
+from cloud_backend.storage import get_default_storage
+from cloud_backend.analytics import metrics
+import numpy as np
+print(metrics.eer(np.random.randn(200), np.random.randint(0,2,200)))
+print(get_default_storage().list_sessions())
+"
+```
+
+## 14. Stabilization infrastructure artifacts
+
+- ExperimentProtocol round-trip:
+
+```bash
+python3 -c "
+from research.experiment_protocol import ExperimentProtocol, write_protocol, load_protocol
+import tempfile, pathlib
+with tempfile.TemporaryDirectory() as t:
+    s = pathlib.Path(t) / 'exp_001'; s.mkdir()
+    p = ExperimentProtocol(attack_type='print', distance_m=2.0,
+                           lighting='normal', orientation='frontal',
+                           mounting='tripod_eye_level', movement='static')
+    print('warnings:', p.validate())
+    write_protocol(s, p)
+    assert load_protocol(s).attack_type == 'print'
+    print('round-trip OK')
+"
+```
+
+- Annotate a real session:
+
+```bash
+python3 -m research.experiment_protocol \
+    --session experiments/exp_<id>/ \
+    --attack-type print --distance 2.0 --lighting normal \
+    --orientation frontal --mounting tripod_eye_level --movement static
+```
+
+- Offline stabilization summary:
+
+```bash
+python3 -m research.analysis.stabilization --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/stabilization.json
+```
+
+- Threshold sweep:
+
+```bash
+python3 -m research.analysis.threshold_sweep \
+    --session experiments/exp_<id>/ --steps 21
+ls experiments/exp_<id>/summaries/threshold_sweep.json
+```
+
+- Cloud-side analytics on synthetic events (no fastapi required):
+
+```bash
+python3 -c "
+from cloud_backend.analytics import stabilization, calibration
+events = [{'event_type':'diagnostic','track_id':1,'fields':{'sim':0.7,'mode_raw':'FRONTAL','lbl':'REAL','cpu_temp_c':62.0,'face_w':120,'face_h':140,'orient_ratio':0.85}}]
+print(stabilization.stabilization_summary(events))
+print(calibration.threshold_sweep(events, [0.5, 0.7, 0.9], mid_offset=0.15))
+"
+```
+
+- Categorization helper:
+
+```bash
+python3 -c "
+from cloud_backend.experiments.registry import categorize_session
+print(categorize_session({'session_id':'x','protocol':{'attack_type':'print','orientation':'frontal','lighting':'normal','distance_m':2.0}}))
+"
+```
+
+- Cloud composite endpoint check (server running):
+
+```bash
+curl -s http://localhost:8000/api/metrics/stabilization | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/metrics/threshold_sweep | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/sessions/exp_<id>/protocol | python3 -m json.tool
+curl -s http://localhost:8000/api/sessions/exp_<id>/category | python3 -m json.tool
+```
+
+## 15. Runtime stabilization readiness artifacts
+
+- Gap-filling runtime diagnostics:
+
+```bash
+python3 -m research.analysis.runtime_diagnostics \
+    --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/runtime_diagnostics.json
+```
+
+- Quality gates (default thresholds):
+
+```bash
+python3 -m research.analysis.quality_gates \
+    --session experiments/exp_<id>/
+# Override one threshold for an outdoor session
+python3 -m research.analysis.quality_gates \
+    --session experiments/exp_<id>/ \
+    --threshold brightness_p50_alert=20.0
+```
+
+- One-shot bundle (every analyzer + protocol + Markdown):
+
+```bash
+python3 -m research.analysis.stabilization_report \
+    --session experiments/exp_<id>/
+ls experiments/exp_<id>/summaries/stabilization_report.{json,md}
+```
+
+- Cloud-side quality evaluation on synthetic events (numpy only):
+
+```bash
+python3 -c "
+from cloud_backend.analytics import quality
+events = [{'event_type':'diagnostic','track_id':1,
+           'fields':{'distance':0.45,'brightness':25.0,'avg_blur':35.0,
+                     'decision':'OFFLOAD_TO_CLOUD','lbl':'REAL','sim':0.40,
+                     'cpu_temp_c':85.0,'cloud_outcome':'timeout',
+                     'identity':'s1','mode_raw':'FRONTAL','face_w':120,'face_h':140}}]
+print(quality.evaluate(events))
+"
+```
+
+- Cloud endpoints (server running):
+
+```bash
+curl -s http://localhost:8000/api/metrics/quality_tags?session_id=exp_<id> | python3 -m json.tool | head -40
+curl -s http://localhost:8000/api/sessions/exp_<id>/quality_tags | python3 -m json.tool | head -40
+```
+
+## 16. Calibration & stabilization framework artifacts
+
+- Discover presets:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator --list
+```
+
+- Plan a sweep:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator --preset distance_sweep --plan
+```
+
+- After captures, aggregate:
+
+```bash
+python3 -m research.experiments.sweep_orchestrator \
+    --preset distance_sweep \
+    --sessions experiments/exp_001/ experiments/exp_002/ experiments/exp_003/
+```
+
+- Standalone analyzer CLIs:
+
+```bash
+python3 -m research.analysis.session_aggregator --sessions experiments/exp_*/ \
+    --sweep-dimension distance_m
+python3 -m research.analysis.session_comparison \
+    --baseline experiments/exp_001/ --modified experiments/exp_002/
+python3 -m research.analysis.stability_score --session experiments/exp_001/
+python3 -m research.analysis.calibration recommend-thresholds \
+    --session experiments/exp_001/ --target-matched-rate 0.50 \
+    --out experiments/exp_001/summaries/threshold_recommendation.json
+```
+
+- Cloud endpoints (server running):
+
+```bash
+curl -s "http://localhost:8000/api/aggregate/sessions?ids=exp_001&ids=exp_002" | python3 -m json.tool | head -40
+curl -s "http://localhost:8000/api/compare/sessions?baseline=exp_001&modified=exp_002" | python3 -m json.tool
+curl -s "http://localhost:8000/api/experiments/pilot/aggregate" | python3 -m json.tool | head -40
+curl -s "http://localhost:8000/api/evaluation/orientation?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/pad?session_id=exp_001&attack_type=print" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/thermal?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/offload_efficiency?session_id=exp_001" | python3 -m json.tool
+curl -s "http://localhost:8000/api/evaluation/latency?session_id=exp_001" | python3 -m json.tool
+```
+
+## 17. Runtime stabilization phase artifacts (eighth pass)
+
+- Five offline diagnostics, each emits a sidecar JSON under
+  `experiments/exp_<id>/summaries/`:
+
+```bash
+python3 -m research.analysis.orientation_diagnostics    --session experiments/exp_<id>/
+python3 -m research.analysis.yunet_stabilization        --session experiments/exp_<id>/
+python3 -m research.analysis.recognition_stabilization  --session experiments/exp_<id>/
+python3 -m research.analysis.pad_stabilization          --session experiments/exp_<id>/
+python3 -m research.analysis.offload_performance        --session experiments/exp_<id>/
+```
+
+- Output paths (one JSON per analyzer):
+
+```bash
+ls experiments/exp_<id>/summaries/
+# orientation_diagnostics.json, yunet_stabilization.json,
+# recognition_stabilization.json, pad_stabilization.json,
+# offload_performance.json (in addition to earlier-pass artefacts)
+```
+
+- Order-of-magnitude expectations from the reference data:
+  - `orientation_diagnostics.valid_fraction` ≥ 0.20
+  - `yunet_stabilization.persistence.mean_active_fraction` ≥ 0.25 on Pi
+  - `recognition_stabilization.sim_volatility.sim_std_mean` ≤ 0.25
+  - `pad_stabilization.pad_stability_score` ≥ 0.30 for genuine sessions
+  - `offload_performance.cadence.cv` ≤ 0.30
+  - `offload_performance.cpu_hotspots.rows[0].stage == "t_detect_ms"` (always)
+
+## 18. Minimal runtime stabilization knobs (ninth pass)
+
+- Defaults preserve historic behaviour — `python run.py` with no env
+  overrides is identical to the pass-7 build:
+
+```bash
+python3 -c "
+from config import settings
+assert settings.ORIENTATION_OVERHEAD_TH == 0.60
+assert settings.YUNET_INPUT_W == 640 and settings.YUNET_INPUT_H == 480
+assert settings.BBOX_EMA_ALPHA == 0.0 and settings.SIM_EMA_ALPHA == 0.0
+assert settings.MATCH_PERSISTENCE_FRAMES == 1
+assert settings.PAD_SPOOF_STREAK_REQUIRED == 1
+print('defaults preserve historic behaviour')
+"
+```
+
+- Each stabilizer class is a pure-Python no-op at its default value:
+
+```bash
+python3 -c "
+from edge.stabilization import (BBoxEMASmoother, SimEMASmoother,
+    MatchPersistenceCounter, PADSpoofStreakSmoother)
+assert BBoxEMASmoother(0.0).smooth(1, (100,100,50,60)) == (100,100,50,60)
+assert SimEMASmoother(0.0).smooth(1, 0.7) == 0.7
+assert MatchPersistenceCounter(1).observe(1, 'x') == (1, True)
+assert PADSpoofStreakSmoother(1).smooth(1, 'SPOOF') == 'SPOOF'
+print('stabilizers no-op at defaults')
+"
+```
+
+- Env overrides honoured at runtime; settings_snapshot.json pins the
+  active configuration so `session_comparison` picks up the delta:
+
+```bash
+ORIENTATION_OVERHEAD_TH=0.85 BBOX_EMA_ALPHA=0.30 MATCH_PERSISTENCE_FRAMES=2 \
+    python run.py
+ls experiments/exp_<id>/config/settings_snapshot.json
+```
+
+- See `docs/STABILIZATION_KNOBS.md` for the full env-var reference and
+  recommended starting points.

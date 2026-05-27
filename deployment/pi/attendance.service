@@ -1,0 +1,42 @@
+[Unit]
+Description=Attendance Edge Pipeline (facial recognition)
+# Start after the network is up; also after any camera driver service
+# if one exists (e.g. libcamera or bcm2835-v4l2 udev rules).
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/attendance
+
+# Activate the project virtualenv so tflite-runtime etc. are on PATH.
+ExecStart=/home/pi/attendance/venv/bin/python run.py
+
+# Restart automatically on non-clean exit (crash, OOM, etc.)
+# A 5 s delay prevents a tight crash-restart loop from hammering the CPU.
+Restart=on-failure
+RestartSec=5
+
+# Environment -------------------------------------------------------
+# HEADLESS=1     — no display connected; skip all cv2.imshow calls.
+# VERBOSE_DEBUG=0 — silence per-frame console prints (journald captures
+#                  stdout; keeping it quiet reduces log volume).
+# CAMERA_BACKEND  — "libcamera" auto-selects between GStreamer and the
+#                  rpicam-vid subprocess backend.  Both work with Conda
+#                  Python 3.10 without any libcamera Python ABI issues.
+#                  Switch to "libcamera_subprocess" to force the
+#                  subprocess path if GStreamer is not installed.
+# EXPERIMENT_LABEL — leave blank for production; set to a session tag
+#                  when running a named calibration session.
+Environment=HEADLESS=1
+Environment=VERBOSE_DEBUG=0
+Environment=CAMERA_BACKEND=libcamera
+Environment=EXPERIMENT_LABEL=
+
+# Standard output and error both go to systemd's journal.
+# View with: journalctl -u attendance -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

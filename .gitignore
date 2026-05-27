@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+cloud/.venv/
 env/
 venv/
 ENV/
@@ -217,10 +218,44 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# datasets
+dataset_raw/
+dataset_processed/
 
-dataset/
-data/
+# biometric DB
+data/known_faces.json
+data/known_faces.OLD_UNALIGNED.json
+
+# diagnostics
+*.csv
+logs/
+diagnostics/
+
+# python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# models
 models/
 *.onnx
 *.tflite
-__pycache__/
+*.pth
+
+# cloud_backend filesystem storage (sessions + events)
+cloud_storage/
+
+# packaging output from deployment/common/package_*.sh
+/dist/
+
+# Reference experiment archive (large; analysis output lives in
+# docs/reference_experiment_analysis.md — the zip itself is not source).
+/reference_experiments.zip
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,4 +1,16 @@
-numpy==1.24.3
-opencv-python-headless==4.8.0.76  # Or opencv-python for UI
-tensorflow-cpu==2.13.0            # tflite_runtime is preferred on Pi
-scipy==1.10.1
+# DEPRECATED — kept for legacy muscle memory (note: filename typo).
+#
+# This file used to be the only requirements list (pre-split). The canonical
+# pins are now bundle-specific:
+#
+#   Edge / Raspberry Pi:  pip install -r edge/requirements-edge.txt
+#   Cloud / ArcFace srv:  pip install -r cloud/requirements.txt
+#
+# Forward to the edge stack, since the historical content of this file
+# (numpy, opencv-python-headless, scipy, psutil, the now-removed
+# tensorflow-cpu) was the on-device dependency set.
+#
+# pip install -r requirments.txt
+#   == pip install -r edge/requirements-edge.txt
+
+-r edge/requirements-edge.txt
