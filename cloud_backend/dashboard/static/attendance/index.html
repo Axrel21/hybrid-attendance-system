@@ -18,18 +18,18 @@
 
   <main>
     <section class="section-block section-primary surveillance-summary">
-      <h2>Surveillance summary</h2>
+      <h2>Anonymous presence summary</h2>
       <div class="summary-cards">
         <div class="summary-card">
-          <span class="summary-label">Active tracks</span>
+          <span class="summary-label">Active anonymous tracks</span>
           <span class="summary-value" id="sum-active-tracks">—</span>
         </div>
         <div class="summary-card">
-          <span class="summary-label">Observed students</span>
+          <span class="summary-label">Attendance–presence overlap</span>
           <span class="summary-value" id="sum-observed-students">—</span>
         </div>
         <div class="summary-card">
-          <span class="summary-label">Presence coverage</span>
+          <span class="summary-label">Consistency coverage</span>
           <span class="summary-value" id="sum-presence-coverage">—</span>
         </div>
       </div>
@@ -58,7 +58,10 @@
 
     <section class="section-block section-secondary surveillance-panels">
       <article class="panel panel-wide">
-        <div class="panel-head">Surveillance presence</div>
+        <div class="panel-head">
+          Anonymous presence sessions
+          <span class="badge-experimental" title="Anonymous occupancy-oriented sensing">Occupancy-oriented</span>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -67,13 +70,18 @@
                 <th>Camera</th>
                 <th>Duration</th>
                 <th>Status</th>
+                <th>
+                  Entry correlation
+                  <span class="badge-experimental badge-inline">Experimental</span>
+                </th>
               </tr>
             </thead>
             <tbody id="presence-body"></tbody>
           </table>
         </div>
         <p id="presence-empty" class="panel-empty empty-state-inline" hidden>
-          <span class="empty-state-title">No active occupancy</span>
+          <span class="empty-state-title">No anonymous presence sessions</span>
+          <span class="empty-state-hint">Start the surveillance runtime to stream occupancy-oriented presence events.</span>
         </p>
       </article>
     </section>
@@ -85,8 +93,73 @@
       </div>
 
       <div class="panels">
+        <article class="panel panel-wide">
+          <div class="panel-head panel-head-split">
+            <span>Occupancy analytics</span>
+            <span class="panel-head-meta" id="occ-lecture-duration">—</span>
+          </div>
+          <p class="panel-sub">Operational consistency metrics derived from anonymous occupancy sensing.</p>
+
+          <div id="lecture-summary-card" class="lecture-summary-card" hidden>
+            <div class="lecture-summary-head">
+              <strong>Lecture summary snapshot</strong>
+              <button type="button" id="btn-copy-summary" class="btn btn-sm btn-ghost">Copy summary</button>
+            </div>
+            <dl class="lecture-summary-grid" id="lecture-summary-grid"></dl>
+          </div>
+
+          <div class="occupancy-metrics">
+            <div class="summary-card summary-card-peak">
+              <span class="summary-label">Peak occupancy</span>
+              <div class="summary-value-row">
+                <span class="summary-value" id="occ-peak">—</span>
+                <span id="occ-peak-badge" class="metric-badge peak-badge" hidden>Peak</span>
+              </div>
+              <canvas id="occ-sparkline" class="occ-sparkline" width="120" height="28" aria-hidden="true"></canvas>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Attendance consistency</span>
+              <span class="summary-value" id="occ-consistency">—</span>
+              <span id="occ-consistency-status" class="consistency-badge muted">—</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Retention ratio</span>
+              <span class="summary-value" id="occ-retention">—</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Early arrivals</span>
+              <span class="summary-value" id="occ-arrivals">—</span>
+              <span class="summary-hint" id="occ-arrivals-hint"></span>
+            </div>
+          </div>
+
+          <div class="occupancy-chart-wrap" id="occupancy-chart-wrap" hidden>
+            <canvas id="occupancy-chart" aria-label="Occupancy over time line chart"></canvas>
+          </div>
+
+          <details class="occupancy-table-details">
+            <summary>Timeline data table</summary>
+            <div class="occupancy-timeline-wrap">
+              <table class="occupancy-timeline-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Occupancy</th>
+                  </tr>
+                </thead>
+                <tbody id="occupancy-timeline-body"></tbody>
+              </table>
+            </div>
+          </details>
+
+          <p id="occupancy-analytics-empty" class="panel-empty empty-state-inline" hidden>
+            <span class="empty-state-title">No occupancy samples yet</span>
+            <span class="empty-state-hint" id="occupancy-analytics-hint"></span>
+          </p>
+        </article>
+
         <article class="panel">
-          <div class="panel-head">Presence evidence</div>
+          <div class="panel-head">Attendance consistency evidence</div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -103,7 +176,8 @@
             </table>
           </div>
           <p id="evidence-empty" class="panel-empty empty-state-inline" hidden>
-            <span class="empty-state-title">No surveillance evidence</span>
+            <span class="empty-state-title">No attendance consistency evidence</span>
+            <span class="empty-state-hint">Evidence links recognition logs with anonymous presence sessions.</span>
           </p>
         </article>
 
@@ -156,7 +230,7 @@
               <thead>
                 <tr>
                   <th>Received</th>
-                  <th>Identity</th>
+                  <th>Gallery ID</th>
                   <th>Conf</th>
                   <th>Camera</th>
                   <th>Outcome</th>

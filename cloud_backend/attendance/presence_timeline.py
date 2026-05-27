@@ -22,13 +22,15 @@ class PresenceSession:
     first_seen: int
     last_seen: int
     status: PresenceStatus
+    handoff_identity: str | None = None
+    handoff_confidence: str | None = None
 
     @property
     def duration_sec(self) -> int:
         return max(0, (self.last_seen - self.first_seen) // 1000)
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "camera_id": self.camera_id,
             "track_id": self.track_id,
             "first_seen": self.first_seen,
@@ -36,6 +38,10 @@ class PresenceSession:
             "duration_sec": self.duration_sec,
             "status": self.status,
         }
+        if self.handoff_identity:
+            payload["handoff_identity"] = self.handoff_identity
+            payload["handoff_confidence"] = self.handoff_confidence
+        return payload
 
 
 def _default_timeout_ms() -> int:
@@ -58,6 +64,8 @@ class PresenceTimelineService:
         track_id: int,
         event: str,
         timestamp_ms: int,
+        handoff_identity: str | None = None,
+        handoff_confidence: str | None = None,
     ) -> None:
         """Apply appeared / heartbeat / disappeared to session state."""
         with self._lock:
@@ -70,6 +78,8 @@ class PresenceTimelineService:
                     first_seen=timestamp_ms,
                     last_seen=timestamp_ms,
                     status="active",
+                    handoff_identity=handoff_identity,
+                    handoff_confidence=handoff_confidence,
                 )
                 return
 

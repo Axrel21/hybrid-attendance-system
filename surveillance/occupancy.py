@@ -14,6 +14,7 @@ _DEFAULT_CONFIDENCE = 0.35
 _TRACKER_CONFIG = "bytetrack.yaml"
 
 _active_track_ids: list[int] = []
+_track_centroids: dict[int, tuple[float, float]] = {}
 
 
 def _confidence_threshold() -> float:
@@ -38,13 +39,21 @@ def get_active_track_ids() -> list[int]:
     return list(_active_track_ids)
 
 
+def get_track_centroids() -> dict[int, tuple[float, float]]:
+    """Pixel centroids for active tracks from the latest frame."""
+    return dict(_track_centroids)
+
+
 def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
-    global _active_track_ids
+    global _active_track_ids, _track_centroids
     track_ids: list[int] = []
+    centroids: dict[int, tuple[float, float]] = {}
+    height, width = frame.shape[:2]
 
     boxes = result.boxes
     if boxes is None or len(boxes) == 0 or boxes.id is None:
         _active_track_ids = []
+        _track_centroids = {}
         return
 
     xyxy = boxes.xyxy.cpu().numpy()
@@ -54,6 +63,7 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
         tid = int(track_id)
         track_ids.append(tid)
         x1, y1, x2, y2 = map(int, box)
+        centroids[tid] = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 128, 0), 2)
         cv2.putText(
             frame,
@@ -67,6 +77,26 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
         )
 
     _active_track_ids = sorted(set(track_ids))
+    _track_centroids = centroids
+
+    # Doorway ROI overlay (experimental entry correlation)
+    from surveillance.entry_zone import ENTRY_ZONE_RECT
+
+    rx1 = int(ENTRY_ZONE_RECT[0] * width)
+    ry1 = int(ENTRY_ZONE_RECT[1] * height)
+    rx2 = int(ENTRY_ZONE_RECT[2] * width)
+    ry2 = int(ENTRY_ZONE_RECT[3] * height)
+    cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 180, 255), 1)
+    cv2.putText(
+        frame,
+        "Entry zone",
+        (rx1 + 4, max(ry1 + 14, 14)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.45,
+        (0, 180, 255),
+        1,
+        cv2.LINE_AA,
+    )
 
     y = 58
     cv2.putText(
@@ -95,10 +125,11 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
 
 def estimate_occupancy(frame: np.ndarray) -> int:
     """Return count of unique active tracked persons; draws track overlay on frame."""
-    global _active_track_ids
+    global _active_track_ids, _track_centroids
 
     if frame is None or frame.size == 0:
         _active_track_ids = []
+        _track_centroids = {}
         return 0
 
     results = _get_model().track(
@@ -113,6 +144,7 @@ def estimate_occupancy(frame: np.ndarray) -> int:
     )
     if not results:
         _active_track_ids = []
+        _track_centroids = {}
         return 0
 
     _draw_tracking_overlay(frame, results[0])

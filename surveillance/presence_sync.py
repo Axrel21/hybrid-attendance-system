@@ -22,12 +22,25 @@ class PresenceSync:
         self._prev_ids: set[int] = set()
         self._last_heartbeat = 0.0
 
-    def observe(self, active_track_ids: list[int], occupancy: int) -> None:
+    def observe(
+        self,
+        active_track_ids: list[int],
+        occupancy: int,
+        *,
+        track_entry_zone: dict[int, bool] | None = None,
+    ) -> None:
         """Emit appeared/disappeared/heartbeat based on current tracks. Never raises."""
         current = set(active_track_ids)
+        entry_zone = track_entry_zone or {}
 
         for track_id in sorted(current - self._prev_ids):
-            self._client.emit(track_id=track_id, event="appeared", occupancy=occupancy)
+            in_zone = entry_zone.get(track_id)
+            self._client.emit(
+                track_id=track_id,
+                event="appeared",
+                occupancy=occupancy,
+                in_entry_zone=in_zone,
+            )
 
         for track_id in sorted(self._prev_ids - current):
             self._client.emit(track_id=track_id, event="disappeared", occupancy=occupancy)

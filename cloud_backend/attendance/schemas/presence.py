@@ -19,6 +19,10 @@ class PresenceEvent(BaseModel):
     event: PresenceEventType
     timestamp_ms: int = Field(..., ge=0)
     occupancy: int = Field(..., ge=0)
+    in_entry_zone: bool | None = Field(
+        None,
+        description="Experimental: track centroid inside doorway ROI at event time",
+    )
 
 
 class PresenceEventResult(BaseModel):
@@ -44,6 +48,11 @@ class PresenceSessionResponse(BaseModel):
     last_seen: int = Field(..., description="Last seen wall-clock ms")
     duration_sec: int = Field(..., ge=0)
     status: PresenceSessionStatus
+    handoff_identity: str | None = Field(
+        None,
+        description="Experimental doorway entry correlation — not persistent identity",
+    )
+    handoff_confidence: str | None = None
 
 
 class PresenceSessionListResponse(BaseModel):

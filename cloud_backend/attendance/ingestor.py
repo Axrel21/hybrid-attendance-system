@@ -11,6 +11,7 @@ global active-lecture lookup for backward compatibility.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from cloud_backend.attendance.doorway_handoff import get_doorway_handoff_queue
 from cloud_backend.attendance.engine import AttendanceEngine, TransitionResult
 from cloud_backend.classroom.resolver import resolve_active_lecture, resolve_classroom
 from cloud_backend.models.attendance_record import AttendanceRecord
@@ -247,6 +249,13 @@ class RecognitionIngestor:
             disposition = Disposition.ACCEPTED
         else:
             disposition = Disposition.SUPPRESSED
+
+        if result.accepted:
+            get_doorway_handoff_queue().push(
+                identity=gallery_identity,
+                timestamp_ms=timestamp_ms or int(time.time() * 1000),
+                classroom_id=resolved_classroom_id,
+            )
 
         return IngestorResult(
             accepted=result.accepted,

@@ -7,7 +7,8 @@ import os
 import cv2
 
 from surveillance.camera import WebcamCapture
-from surveillance.occupancy import estimate_occupancy, get_active_track_ids
+from surveillance.occupancy import estimate_occupancy, get_active_track_ids, get_track_centroids
+from surveillance.entry_zone import centroid_in_entry_zone_pixels
 from surveillance.presence_client import SurveillancePresenceClient, resolve_presence_api_url
 from surveillance.presence_sync import build_presence_sync
 
@@ -49,7 +50,12 @@ def main() -> int:
     try:
         for frame in camera.frames():
             count = estimate_occupancy(frame)
-            presence.observe(get_active_track_ids(), count)
+            height, width = frame.shape[:2]
+            track_entry_zone = {
+                track_id: centroid_in_entry_zone_pixels(cx, cy, frame_width=width, frame_height=height)
+                for track_id, (cx, cy) in get_track_centroids().items()
+            }
+            presence.observe(get_active_track_ids(), count, track_entry_zone=track_entry_zone)
 
             cv2.putText(
                 frame,

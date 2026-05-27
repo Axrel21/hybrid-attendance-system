@@ -90,6 +90,7 @@ class SurveillancePresenceClient:
         event: str,
         occupancy: int,
         timestamp_ms: Optional[int] = None,
+        in_entry_zone: Optional[bool] = None,
     ) -> PresenceEmitResult:
         """Queue or send one presence event. Never raises."""
         if not self.enabled:
@@ -102,6 +103,8 @@ class SurveillancePresenceClient:
             "timestamp_ms": timestamp_ms if timestamp_ms is not None else int(time.time() * 1000),
             "occupancy": max(0, int(occupancy)),
         }
+        if in_entry_zone is not None:
+            payload["in_entry_zone"] = bool(in_entry_zone)
 
         if self.batch_size <= 1:
             return self._post_one(payload)

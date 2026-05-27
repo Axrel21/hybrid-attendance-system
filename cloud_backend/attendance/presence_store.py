@@ -26,6 +26,10 @@ class PresenceEventStore:
         with self._lock:
             return list(self._entries[-limit:])
 
+    def all_entries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._entries)
+
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()

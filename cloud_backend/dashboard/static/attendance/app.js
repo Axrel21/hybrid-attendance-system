@@ -16,6 +16,7 @@ const API = {
   presenceSessions: "/presence/sessions",
   evidence: "/attendance/evidence",
   evidenceForLecture: (id) => `/attendance/evidence/${id}`,
+  occupancyAnalytics: (id) => `/attendance/lectures/${id}/occupancy/analytics`,
   health: "/health",
   healthAttendance: "/health/attendance",
   config: "/system/config",
@@ -44,6 +45,9 @@ let createFormLoading = false;
 let lifecycleActionLoading = false;
 let pendingFinalize = null;
 let lectureStatusById = new Map();
+let lastOccupancyAnalytics = null;
+let lastOccupancySummary = null;
+let lastSelectedEntry = null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -92,6 +96,379 @@ function setEmptyTitle(el, title) {
   const titleEl = el.querySelector(".empty-state-title");
   if (titleEl) titleEl.textContent = title;
   else el.textContent = title;
+}
+
+function fmtRatio(value) {
+  const n = sanitizeRatio(value);
+  if (n == null) return "—";
+  return n.toFixed(2);
+}
+
+function sanitizeRatio(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+function sanitizeCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n);
+}
+
+function consistencyStatus(ratio) {
+  const r = sanitizeRatio(ratio);
+  if (r == null) return { label: "Insufficient data", tone: "muted" };
+  if (r >= 0.9 && r <= 1.1) return { label: "Strong agreement", tone: "ok" };
+  if (r >= 0.6 && r < 0.9) return { label: "Partial mismatch", tone: "warn" };
+  if (r > 1.3) return { label: "Occupancy anomaly", tone: "warn" };
+  if (r < 0.6) return { label: "Low recognition coverage", tone: "warn" };
+  if (r > 1.1 && r <= 1.3) return { label: "Moderate variance", tone: "muted" };
+  return { label: "Review suggested", tone: "muted" };
+}
+
+function consistencyBadgeHtml(status) {
+  if (!status?.label || status.label === "—") {
+    return `<span class="consistency-badge muted">—</span>`;
+  }
+  return `<span class="consistency-badge ${status.tone}">${status.label}</span>`;
+}
+
+function buildLectureSummary(analytics) {
+  if (!analytics) return null;
+  return {
+    recognized_attendance: sanitizeCount(analytics.recognized_attendance_count),
+    peak_occupancy: sanitizeCount(analytics.peak_occupancy),
+    consistency_ratio: sanitizeRatio(analytics.consistency_ratio),
+    retention_ratio: sanitizeRatio(analytics.retention_ratio),
+    arrival_concentration: sanitizeCount(analytics.arrival_concentration),
+  };
+}
+
+function formatLectureDuration(entry) {
+  const lec = entry?.lecture;
+  if (!lec) return "—";
+  const start = lec.actual_start || lec.scheduled_start;
+  const end = lec.actual_end || lec.scheduled_end;
+  if (!start || !end) return "—";
+  try {
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return "—";
+    const mins = Math.round((endMs - startMs) / 60000);
+    if (mins < 60) return `${mins} min scheduled`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m scheduled` : `${h}h scheduled`;
+  } catch {
+    return "—";
+  }
+}
+
+function occupancyEmptyMessage(state) {
+  const messages = {
+    no_surveillance: {
+      title: "Anonymous presence inactive",
+      hint: "Start the surveillance runtime to collect occupancy samples for this lecture.",
+    },
+    no_data: {
+      title: "No occupancy samples yet",
+      hint: "Samples appear as heartbeats arrive from the anonymous presence pipeline.",
+    },
+    insufficient: {
+      title: "Insufficient timeline data",
+      hint: "At least two timeline buckets are recommended for a readable chart.",
+    },
+    fetch_error: {
+      title: "Analytics temporarily unavailable",
+      hint: "The panel will retry on the next poll cycle.",
+    },
+    default: {
+      title: "No occupancy analytics available",
+      hint: "Select an active lecture with surveillance data flowing.",
+    },
+  };
+  return messages[state] || messages.default;
+}
+
+function entryCorrelationLabel(session) {
+  if (!session?.handoff_identity) return "—";
+  const conf = session.handoff_confidence || "spatial-temporal";
+  return `${session.handoff_identity} · ${conf}`;
+}
+
+function destroyOccupancyChart() {
+  const canvas = $("#occupancy-chart");
+  if (!canvas) return;
+  const wrap = $("#occupancy-chart-wrap");
+  if (wrap) wrap.hidden = true;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawSparkline(canvas, timeline) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  const points = (timeline || []).map((p) => sanitizeCount(p.occupancy));
+  if (points.length < 2) return;
+
+  const max = Math.max(1, ...points);
+  const pad = 2;
+  const step = (width - pad * 2) / (points.length - 1);
+
+  ctx.strokeStyle = "rgba(59, 130, 246, 0.85)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  points.forEach((value, idx) => {
+    const x = pad + idx * step;
+    const y = height - pad - ((value / max) * (height - pad * 2));
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function renderOccupancyChart(timeline) {
+  const canvas = $("#occupancy-chart");
+  const wrap = $("#occupancy-chart-wrap");
+  if (!canvas || !wrap) return;
+
+  const points = (timeline || []).filter(
+    (p) => p && Number.isFinite(Number(p.occupancy)),
+  );
+  if (points.length < 1) {
+    destroyOccupancyChart();
+    return;
+  }
+
+  wrap.hidden = false;
+  const rect = wrap.getBoundingClientRect();
+  const cssWidth = Math.max(280, rect.width || 280);
+  const cssHeight = 200;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(cssWidth * dpr);
+  canvas.height = Math.floor(cssHeight * dpr);
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const labels = points.map((p) => String(p.t || ""));
+  const values = points.map((p) => sanitizeCount(p.occupancy));
+  const maxVal = Math.max(1, ...values);
+  const padLeft = 36;
+  const padRight = 12;
+  const padTop = 16;
+  const padBottom = 28;
+  const plotW = cssWidth - padLeft - padRight;
+  const plotH = cssHeight - padTop - padBottom;
+
+  ctx.strokeStyle = "#2d3a4f";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = padTop + (plotH * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(cssWidth - padRight, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#8b9cb3";
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(String(maxVal), padLeft - 6, padTop + 4);
+  ctx.fillText("0", padLeft - 6, padTop + plotH + 4);
+
+  const step = points.length > 1 ? plotW / (points.length - 1) : 0;
+  const coords = values.map((value, idx) => ({
+    x: padLeft + step * idx,
+    y: padTop + plotH - (value / maxVal) * plotH,
+  }));
+
+  if (coords.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(coords[0].x, padTop + plotH);
+    coords.forEach((c) => ctx.lineTo(c.x, c.y));
+    ctx.lineTo(coords[coords.length - 1].x, padTop + plotH);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(59, 130, 246, 0.12)";
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "#3b82f6";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  coords.forEach((c, idx) => {
+    if (idx === 0) ctx.moveTo(c.x, c.y);
+    else ctx.lineTo(c.x, c.y);
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = "#22c55e";
+  coords.forEach((c) => {
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = "#8b9cb3";
+  ctx.textAlign = "center";
+  const labelEvery = Math.max(1, Math.ceil(points.length / 6));
+  labels.forEach((label, idx) => {
+    if (idx % labelEvery !== 0 && idx !== labels.length - 1) return;
+    ctx.fillText(label, coords[idx].x, cssHeight - 8);
+  });
+}
+
+function renderLectureSummaryCard(summary) {
+  const card = $("#lecture-summary-card");
+  const grid = $("#lecture-summary-grid");
+  if (!card || !grid) return;
+
+  if (!summary) {
+    card.hidden = true;
+    grid.innerHTML = "";
+    return;
+  }
+
+  card.hidden = false;
+  grid.innerHTML = `
+    <div><dt>Recognized attendance</dt><dd>${summary.recognized_attendance}</dd></div>
+    <div><dt>Peak occupancy</dt><dd>${summary.peak_occupancy}</dd></div>
+    <div><dt>Consistency ratio</dt><dd>${fmtRatio(summary.consistency_ratio)}</dd></div>
+    <div><dt>Retention ratio</dt><dd>${fmtRatio(summary.retention_ratio)}</dd></div>
+    <div><dt>Early arrivals</dt><dd>${summary.arrival_concentration}</dd></div>
+  `;
+}
+
+function renderOccupancyAnalytics(data, options = {}) {
+  const state = options.state || "ok";
+  const empty = $("#occupancy-analytics-empty");
+  const body = $("#occupancy-timeline-body");
+  const hintEl = $("#occupancy-analytics-hint");
+  if (!empty || !body) return;
+
+  const resetMetrics = () => {
+    $("#occ-peak").textContent = "—";
+    $("#occ-consistency").textContent = "—";
+    $("#occ-retention").textContent = "—";
+    $("#occ-arrivals").textContent = "—";
+    const peakBadge = $("#occ-peak-badge");
+    if (peakBadge) peakBadge.hidden = true;
+    const statusEl = $("#occ-consistency-status");
+    if (statusEl) {
+      statusEl.className = "consistency-badge muted";
+      statusEl.textContent = "—";
+    }
+    const arrivalsHint = $("#occ-arrivals-hint");
+    if (arrivalsHint) arrivalsHint.textContent = "";
+    const durationEl = $("#occ-lecture-duration");
+    if (durationEl) durationEl.textContent = formatLectureDuration(lastSelectedEntry);
+    drawSparkline($("#occ-sparkline"), []);
+    destroyOccupancyChart();
+    body.innerHTML = "";
+    renderLectureSummaryCard(null);
+    lastOccupancyAnalytics = null;
+    lastOccupancySummary = null;
+  };
+
+  if (state !== "ok" || !data) {
+    resetMetrics();
+    const msg = occupancyEmptyMessage(state);
+    setEmptyTitle(empty, msg.title);
+    if (hintEl) hintEl.textContent = msg.hint;
+    empty.hidden = false;
+    return;
+  }
+
+  lastOccupancyAnalytics = data;
+  lastOccupancySummary = buildLectureSummary(data);
+  renderLectureSummaryCard(lastOccupancySummary);
+
+  const peak = sanitizeCount(data.peak_occupancy);
+  $("#occ-peak").textContent = String(peak);
+  const peakBadge = $("#occ-peak-badge");
+  if (peakBadge) peakBadge.hidden = peak <= 0;
+
+  const consistency = sanitizeRatio(data.consistency_ratio);
+  $("#occ-consistency").textContent = fmtRatio(consistency);
+  const status = consistencyStatus(consistency);
+  const statusEl = $("#occ-consistency-status");
+  if (statusEl) {
+    statusEl.className = `consistency-badge ${status.tone}`;
+    statusEl.textContent = status.label;
+  }
+
+  $("#occ-retention").textContent = fmtRatio(data.retention_ratio);
+  $("#occ-arrivals").textContent = String(sanitizeCount(data.arrival_concentration));
+  const arrivalsHint = $("#occ-arrivals-hint");
+  if (arrivalsHint && data.arrival_window_minutes) {
+    arrivalsHint.textContent = `First ${data.arrival_window_minutes} min`;
+  }
+
+  const durationEl = $("#occ-lecture-duration");
+  if (durationEl) durationEl.textContent = formatLectureDuration(lastSelectedEntry);
+
+  const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+  body.innerHTML = "";
+  timeline.forEach((point) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${point.t || "—"}</td>
+      <td class="mono">${sanitizeCount(point.occupancy)}</td>
+    `;
+    body.appendChild(tr);
+  });
+
+  drawSparkline($("#occ-sparkline"), timeline);
+  renderOccupancyChart(timeline);
+
+  if (!timeline.length) {
+    destroyOccupancyChart();
+    const msg = occupancyEmptyMessage("no_data");
+    setEmptyTitle(empty, msg.title);
+    if (hintEl) hintEl.textContent = msg.hint;
+    empty.hidden = false;
+    return;
+  }
+
+  if (timeline.length === 1) {
+    const msg = occupancyEmptyMessage("insufficient");
+    if (hintEl) hintEl.textContent = msg.hint;
+    empty.hidden = false;
+    setEmptyTitle(empty, "Occupancy timeline started");
+    return;
+  }
+
+  empty.hidden = true;
+  if (hintEl) hintEl.textContent = "";
+}
+
+function clearOccupancyAnalytics(state = "default") {
+  renderOccupancyAnalytics(null, { state });
+}
+
+async function copyLectureSummary() {
+  const summary = lastOccupancySummary;
+  if (!summary) {
+    showToast("No lecture summary available yet.", "error");
+    return;
+  }
+  const text = JSON.stringify(summary, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Lecture summary copied to clipboard.", "success");
+  } catch {
+    showToast("Could not copy summary to clipboard.", "error");
+  }
 }
 
 function fmtPct(n, total) {
@@ -452,6 +829,7 @@ function isFinalizeEnabled(status) {
 function clearSelectedLecture() {
   onLectureChanged(null);
   selectedLectureId = null;
+  lastSelectedEntry = null;
   $("#detail").classList.remove("visible");
   clearDetailPanels();
   renderSummaryCards();
@@ -532,7 +910,15 @@ async function confirmFinalizeLecture() {
     }
     await patchJson(API.finalizeLecture(lectureId));
     closeFinalizeModal();
-    showToast(`Lecture finalized: ${label}`, "success");
+
+    if (lastOccupancySummary) {
+      showToast(
+        `Lecture finalized — peak occupancy ${lastOccupancySummary.peak_occupancy}, consistency ${fmtRatio(lastOccupancySummary.consistency_ratio)}`,
+        "success",
+      );
+    } else {
+      showToast(`Lecture finalized: ${label}`, "success");
+    }
 
     if (String(selectedLectureId) === String(lectureId)) {
       clearSelectedLecture();
@@ -641,9 +1027,9 @@ function lookupEvidence(record) {
 function presenceLabel(record) {
   const ev = lookupEvidence(record);
   if (ev?.evidence === "presence_observed") {
-    return `<div class="presence-badge observed">presence active</div>`;
+    return `<div class="presence-badge observed">anonymous presence matched</div>`;
   }
-  return `<div class="presence-badge no-presence">presence inactive</div>`;
+  return `<div class="presence-badge no-presence">no anonymous presence match</div>`;
 }
 
 function resetPresenceState() {
@@ -712,6 +1098,7 @@ function renderPresenceSessions(data) {
       <td class="mono">${s.camera_id || "—"}</td>
       <td class="mono">${fmtDuration(s.duration_sec)}</td>
       <td>${statusPill(s.status)}</td>
+      <td class="mono handoff-cell" title="Experimental spatial-temporal handoff — not persistent identity">${entryCorrelationLabel(s)}</td>
     `;
     body.appendChild(tr);
   });
@@ -728,8 +1115,8 @@ function renderEvidencePanel(data) {
     setEmptyTitle(
       empty,
       selectedLectureId
-        ? "No surveillance evidence"
-        : "Select a lecture to view evidence",
+        ? "No attendance consistency evidence"
+        : "Select a lecture to view consistency evidence",
     );
     return;
   }
@@ -755,6 +1142,7 @@ function clearDetailPanels() {
   evidenceByStudent = new Map();
   lastEvidence = { total: 0, records: [] };
   lastRecords = { total: 0, records: [] };
+  clearOccupancyAnalytics("default");
   renderRecords({ records: [] });
   renderEvents({ events: [] });
   renderLogs({ logs: [] });
@@ -855,6 +1243,7 @@ function renderOverview(data) {
 function selectLecture(lectureId, entry, scroll = true) {
   onLectureChanged(lectureId);
   selectedLectureId = lectureId;
+  lastSelectedEntry = entry;
   document.querySelectorAll(".card").forEach((c) => {
     c.classList.toggle("selected", c.dataset.lectureId === lectureId);
   });
@@ -1255,8 +1644,20 @@ async function refreshDetail() {
   if (!presenceEmpty) {
     detailFetches.push(fetchJson(API.evidenceForLecture(selectedLectureId)));
   }
+  detailFetches.push(fetchJson(API.occupancyAnalytics(selectedLectureId)));
 
-  const [records, events, logs, evidence] = await Promise.all(detailFetches);
+  const results = await Promise.allSettled(detailFetches);
+  const records = results[0].status === "fulfilled" ? results[0].value : { records: [] };
+  const events = results[1].status === "fulfilled" ? results[1].value : { events: [] };
+  const logs = results[2].status === "fulfilled" ? results[2].value : { logs: [] };
+
+  let evidence = null;
+  let occupancyResultIndex = 3;
+  if (!presenceEmpty) {
+    evidence = results[3]?.status === "fulfilled" ? results[3].value : null;
+    occupancyResultIndex = 4;
+  }
+  const occupancyResult = results[occupancyResultIndex];
 
   lastRecords = records;
   renderRecords(records);
@@ -1268,9 +1669,17 @@ async function refreshDetail() {
     evidenceByStudent = new Map();
     renderEvidencePanel({ records: [] });
   } else {
-    lastEvidence = evidence;
-    evidenceByStudent = buildEvidenceIndex(evidence.records, selectedLectureId);
-    renderEvidencePanel(evidence);
+    lastEvidence = evidence || { total: 0, records: [] };
+    evidenceByStudent = buildEvidenceIndex(lastEvidence.records, selectedLectureId);
+    renderEvidencePanel(lastEvidence);
+  }
+
+  if (occupancyResult?.status === "fulfilled") {
+    renderOccupancyAnalytics(occupancyResult.value, { state: "ok" });
+  } else if (presenceEmpty) {
+    renderOccupancyAnalytics(null, { state: "no_surveillance" });
+  } else {
+    renderOccupancyAnalytics(null, { state: "fetch_error" });
   }
 
   renderSummaryCards();
@@ -1297,8 +1706,17 @@ function startPolling() {
   pollTimer = setInterval(refresh, POLL_MS);
 }
 
+function initOccupancyUI() {
+  $("#btn-copy-summary")?.addEventListener("click", () => {
+    copyLectureSummary().catch((err) => {
+      showToast(err.message || "Could not copy summary.", "error");
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initCreateLectureUI();
   initLifecycleUI();
+  initOccupancyUI();
   startPolling();
 });

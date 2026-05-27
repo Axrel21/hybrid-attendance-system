@@ -103,6 +103,7 @@ from cloud_backend.dashboard.api import router as dashboard_router  # noqa: E402
 from cloud_backend.api.visibility import router as attendance_visibility_router  # noqa: E402
 from cloud_backend.api.lectures import router as attendance_lectures_router  # noqa: E402
 from cloud_backend.api.recognition import router as recognition_router  # noqa: E402
+from cloud_backend.attendance.occupancy_api import router as occupancy_router  # noqa: E402
 from cloud_backend.attendance.presence_api import router as presence_router  # noqa: E402
 from cloud_backend.attendance.evidence_api import router as evidence_router  # noqa: E402
 from cloud_backend.attendance.eligibility_api import router as eligibility_router  # noqa: E402
@@ -126,6 +127,7 @@ app.include_router(attendance_visibility_router)
 app.include_router(attendance_lectures_router)
 app.include_router(recognition_router)
 app.include_router(presence_router)
+app.include_router(occupancy_router)
 app.include_router(evidence_router)
 app.include_router(eligibility_router)
 app.include_router(decision_router)
