@@ -41,6 +41,9 @@ class AttendanceIngestionResult:
     detail: Optional[str] = None
     rtt_ms: float = 0.0
     http_status: Optional[int] = None
+    from_state: Optional[str] = None
+    to_state: Optional[str] = None
+    lecture_id: Optional[str] = None
 
     def to_diag_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +170,9 @@ class AttendanceIngestionClient:
             accepted = bool(data.get("accepted"))
             disposition = data.get("disposition")
             detail = data.get("detail")
+            from_state = data.get("from_state")
+            to_state = data.get("to_state")
+            lecture_id = data.get("lecture_id")
 
             log.info(
                 "Attendance event sent identity=%s accepted=%s disposition=%s rtt=%.0fms",
@@ -184,6 +190,9 @@ class AttendanceIngestionClient:
                 detail=detail,
                 rtt_ms=rtt_ms,
                 http_status=resp.status_code,
+                from_state=from_state,
+                to_state=to_state,
+                lecture_id=str(lecture_id) if lecture_id else None,
             )
 
         except requests.exceptions.Timeout:

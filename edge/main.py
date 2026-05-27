@@ -83,6 +83,7 @@ from edge.offload_router import create_router
 from edge.attendance_client import AttendanceIngestionClient, resolve_attendance_api_url
 from edge.thermal.fan_controller import FanController, load_thermal_config
 from edge.thermal.temperature_reader import TemperatureReader
+from edge.observability import ExperimentObservability
 
 # -----------------------------------------------------------------
 # Absolute paths — derived from this file's location.
@@ -420,6 +421,8 @@ class FinalHybridEdge:
         self._temp_reader  = TemperatureReader()
         self._fan_controller = FanController(load_thermal_config())
         self._fan_state = self._fan_controller.get_state()
+        self._experiment_obs = ExperimentObservability()
+        self._experiment_obs.configure_cloud_poll(_cloud_url)
         if _PSUTIL_AVAILABLE:
             self._psutil_proc = _psutil.Process()
 
@@ -548,6 +551,13 @@ class FinalHybridEdge:
         )
         self._attendance_ingest_cooldowns[identity] = now
         dbg.update(result.to_diag_dict())
+        self._experiment_obs.apply_attendance_ingest(
+            from_state=result.from_state,
+            to_state=result.to_state,
+            lecture_id=result.lecture_id,
+            disposition=result.disposition,
+            detail=result.detail,
+        )
 
     # ------------------------------------------------------------------
     def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
@@ -738,6 +748,10 @@ class FinalHybridEdge:
                 if _temp is not None:
                     self._cpu_temp_c = _temp
                 self._fan_state = self._fan_controller.update(_temp)
+                self._experiment_obs.maybe_poll_cloud_presence(loop_start)
+
+            # ---- Unified experiment observability (per frame) ----
+            self._experiment_obs.reset_frame()
 
             # ---- System resource sampling (every PERF_SAMPLE_INTERVAL frames) ----
             self._frame_count += 1
@@ -1022,7 +1036,9 @@ class FinalHybridEdge:
                         dbg["decision"] = "OFFLOAD_TO_CLOUD"
  
                         routing = self.offload_router.decide(edge_confidence=sim)
- 
+                        dbg["_routing_reason"] = routing.reason
+                        dbg["_routing_should_offload"] = routing.should_offload
+
                         if routing.should_offload and self.cloud_client.is_healthy() and aligned is not None:
                             cloud_result = self.cloud_client.verify(
                                 face_crop_bgr=aligned,
@@ -1105,6 +1121,13 @@ class FinalHybridEdge:
                     ])
 
                 finally:
+                    self._experiment_obs.observe_track(
+                        dbg,
+                        routing_reason=dbg.get("_routing_reason"),
+                        routing_should_offload=dbg.get("_routing_should_offload"),
+                        frame_latency_ms=(time.time() - loop_start) * 1000.0,
+                        latency_budget_ms=float(settings.TARGET_LATENCY_MS),
+                    )
                     max_tl = max(max_tl, float(dbg["t_liveness_ms"]))
                     max_te = max(max_te, float(dbg["t_embed_ms"]))
                     max_tm = max(max_tm, float(dbg["t_match_ms"]))
@@ -1130,7 +1153,7 @@ class FinalHybridEdge:
             t_tracks_ms = (time.perf_counter() - t_tracks_start) * 1000.0
 
             if self._show_overlay:
-                light_line = f"LIGHT: {lighting['level']} ({int(round(lighting['mean'])))})"
+                light_line = f"LIGHT: {lighting['level']} ({int(round(lighting['mean']))})"
                 cv2.putText(
                     frame, light_line, (10, h - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1,
@@ -1217,7 +1240,7 @@ class FinalHybridEdge:
                     kept_count,
                     round(max_live, 3),
                     round(max_sim, 3),
-                ])
+                ] + self._experiment_obs.frame_row_values())
 
             # ---- P6 fix: periodic CSV flush (SD-card I/O coalescing) ----
             if self._frame_count % settings.LOG_FLUSH_INTERVAL == 0:

@@ -428,6 +428,108 @@ def generate_experiment_report(
             stats["dropped_frame_threshold_ms"] = thr
             stats["median_frame_interval_ms"] = med
 
+        # --- D5 unified experiment observability ---
+        from edge.observability import (
+            compute_experiment_health_score,
+            summarize_telemetry_columns,
+        )
+
+        unified = summarize_telemetry_columns(tel)
+        stats.update(unified)
+
+        try:
+            from config import settings as _settings
+
+            stats["latency_target_ms"] = float(
+                _settings.TARGET_LATENCY_MS or 150
+            ) or 150.0
+        except Exception:
+            stats["latency_target_ms"] = 150.0
+
+        if "recognition_source" in tel.columns:
+            src = tel["recognition_source"].astype(str).str.lower()
+            counts = src.value_counts()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            labels = ["local", "cloud", "none"]
+            vals = [int(counts.get(lb, 0)) for lb in labels]
+            ax.bar(labels, vals, color=["#2ca02c", "#1f77b4", "#7f7f7f"])
+            _style_axes(ax, "Source", "Frame count", "Recognition source breakdown")
+            _annotate_figure(fig, exp_lbl, batch_ts)
+            _savefig(plots_dir / "recognition_source_breakdown.png", plt)
+
+        if "attendance_state" in tel.columns and "_t_rel_s" in tel.columns:
+            state_order = [
+                "undetected",
+                "candidate",
+                "initialized",
+                "confirmed",
+                "manual_review",
+                "expired",
+                "insufficient_presence",
+            ]
+            level_map = {s: i for i, s in enumerate(state_order)}
+            ast = tel["attendance_state"].astype(str).str.lower()
+            levels = ast.map(level_map).fillna(0)
+            fig, ax = plt.subplots(figsize=(9, 4))
+            ax.step(
+                tel["_t_rel_s"],
+                levels,
+                where="post",
+                lw=0.9,
+                color="#9467bd",
+            )
+            ax.set_yticks(list(range(len(state_order))))
+            ax.set_yticklabels(state_order)
+            _style_axes(ax, "Time (s from start)", "Attendance state", "Attendance state timeline")
+            _annotate_figure(fig, exp_lbl, batch_ts)
+            _savefig(plots_dir / "attendance_state_timeline.png", plt)
+
+        if "cpu_temp_c" in tel.columns and "offload_reason" in tel.columns:
+            tt = tel[(tel["cpu_temp_c"].astype(float) > 0)].copy()
+            if len(tt) > 1:
+                tt["offload_flag"] = (
+                    tt["offload_reason"].astype(str).str.lower() != "none"
+                ).astype(int)
+                bins = max(5, min(12, len(tt) // 20))
+                try:
+                    tt["temp_bin"] = pd.cut(
+                        tt["cpu_temp_c"].astype(float),
+                        bins=bins,
+                    )
+                    g = tt.groupby("temp_bin", observed=True)["offload_flag"].mean()
+                    centers = [interval.mid for interval in g.index]
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    ax.plot(centers, g.values, marker="o", lw=1.2, color="#d62728")
+                    _style_axes(
+                        ax,
+                        "CPU temperature (°C, bin mid)",
+                        "Offload ratio",
+                        "Offload rate vs temperature",
+                    )
+                    _annotate_figure(fig, exp_lbl, batch_ts)
+                    _savefig(plots_dir / "offload_vs_temp.png", plt)
+                except Exception:
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    sc = ax.scatter(
+                        tt["cpu_temp_c"],
+                        tt["offload_flag"],
+                        c=tt["_t_rel_s"],
+                        cmap="coolwarm",
+                        s=12,
+                        alpha=0.65,
+                    )
+                    plt.colorbar(sc, ax=ax, label="Time (s)")
+                    _style_axes(
+                        ax,
+                        "CPU temperature (°C)",
+                        "Offload (0/1)",
+                        "Offload vs temperature",
+                    )
+                    _annotate_figure(fig, exp_lbl, batch_ts)
+                    _savefig(plots_dir / "offload_vs_temp.png", plt)
+
+        stats["experiment_health_score"] = compute_experiment_health_score(stats)
+
     if diag is not None and len(diag) > 0:
         diag = diag.sort_values("timestamp")
         diag["_t_rel_s"] = diag["timestamp"].astype(float) - float(diag["timestamp"].iloc[0])
@@ -896,6 +998,12 @@ def generate_experiment_report(
         except Exception:
             stats["runtime_log_tail"] = ""
 
+    if "experiment_health_score" not in stats:
+        from edge.observability import compute_experiment_health_score
+
+        stats.setdefault("latency_target_ms", 150.0)
+        stats["experiment_health_score"] = compute_experiment_health_score(stats)
+
     json_path = summ_dir / f"report_{batch_ts}.json"
     with open(json_path, "w", encoding="utf-8") as jf:
         outj = {k: v for k, v in stats.items() if k != "runtime_log_tail"}
@@ -925,6 +1033,15 @@ def generate_experiment_report(
         "cpu_temp_max",
         "fan_state_last",
         "fan_state_counts",
+        "recognition_local_count",
+        "recognition_offload_count",
+        "attendance_confirmed",
+        "attendance_insufficient",
+        "surveillance_presence_ratio",
+        "fan_switch_count",
+        "thermal_time_low_sec",
+        "thermal_time_high_sec",
+        "experiment_health_score",
         "dropped_frames_heuristic",
         "spoof_rows",
         "real_rows",
@@ -968,6 +1085,9 @@ def generate_experiment_report(
             "",
             "Thermal fan plots (when `fan_state` telemetry present): "
             "`fan_vs_temp.png`, `temp_vs_latency.png`, `fan_vs_fps.png`.",
+            "",
+            "Unified observability (D5): `attendance_state_timeline.png`, "
+            "`offload_vs_temp.png`, `recognition_source_breakdown.png`.",
             "",
             "Relational / hypothesis-driven figures use the `rel_` and `hybrid_` prefixes.",
             "",
