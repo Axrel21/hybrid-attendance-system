@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from typing import Literal
 
 from cloud_backend.attendance.presence_timeline import PresenceSession
+from cloud_backend.system.settings import get_settings
 
 EvidenceConfidence = Literal["low", "medium", "high"]
 
 
 def _temporal_window_sec() -> int:
-    raw = os.environ.get("EVIDENCE_TEMPORAL_WINDOW_SEC", "300")
-    try:
-        return max(1, int(float(raw)))
-    except ValueError:
-        return 300
+    return max(1, get_settings().attendance.evidence_temporal_window_sec)
 
 
 class TemporalEvidenceScorer:

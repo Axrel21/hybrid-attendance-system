@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
+
+from cloud_backend.system.settings import get_settings
 from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +19,7 @@ log = logging.getLogger("cloud_backend.attendance.eligibility")
 
 
 def _eligibility_threshold() -> float:
-    raw = os.environ.get("ATTENDANCE_ELIGIBILITY_THRESHOLD", "0.80")
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 0.80
-    return min(1.0, max(0.0, value))
+    return min(1.0, max(0.0, get_settings().attendance.eligibility_threshold))
 
 
 class AttendanceEligibilityService:
@@ -58,10 +54,13 @@ class AttendanceEligibilityService:
             )
 
         results.sort(key=lambda r: (r.lecture_id or "", r.student_id))
-        log.info(
-            "attendance eligibility built total=%d lecture_id=%s",
-            len(results),
-            lecture_id,
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "eligibility_generated",
+            total=len(results),
+            lecture_id=str(lecture_id) if lecture_id else None,
         )
         return results
 

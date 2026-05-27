@@ -14,6 +14,9 @@
 **Server**
 
 - Install from repo: `pip install -r cloud/requirements.txt` (or root `requirements_cloud.txt`).
-- Run from the `cloud/` directory so `gallery/` resolves relative to the process cwd (see `cloud/README.md`).
+- Run composite backend: `bash deployment/cloud/run_backend.sh` (sets profile via `deployment/common/load_profile.sh`).
+- Profiles: `development` (default), `demo`, `production` — see `deployment/env/*.env` and `docs/D5_OPERATIONS.md`.
+- Health: `GET /health`, `GET /health/attendance`, `GET /system/config` on port 8000.
 
-See `docs/DEPLOYMENT.md` for selective copy/rsync guidance.
+See `docs/DEPLOYMENT.md` for selective copy/rsync guidance.  
+See `docs/D5_OPERATIONS.md` for demo run order, venvs, and rollback.

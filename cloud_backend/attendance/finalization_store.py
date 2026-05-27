@@ -29,6 +29,10 @@ class AttendanceFinalizationStore:
         with self._lock:
             self._frozen.clear()
 
+    def lecture_count(self) -> int:
+        with self._lock:
+            return len(self._frozen)
+
 
 _store = AttendanceFinalizationStore()
 

@@ -29,12 +29,15 @@ class PresenceEventHandler:
             event=payload.event,
             timestamp_ms=payload.timestamp_ms,
         )
-        log.info(
-            "presence event received camera_id=%s track_id=%s event=%s occupancy=%s",
-            payload.camera_id,
-            payload.track_id,
-            payload.event,
-            payload.occupancy,
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "presence_ingested",
+            camera_id=payload.camera_id,
+            track_id=payload.track_id,
+            event=payload.event,
+            occupancy=payload.occupancy,
         )
         return PresenceEventResult(
             accepted=True,

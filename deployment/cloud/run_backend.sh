@@ -25,6 +25,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLOUD_DIR="$REPO_ROOT/cloud"
 
+# Load deployment/env/{profile}.env (HYBRID_PROFILE defaults to development)
+# shellcheck source=/dev/null
+source "$REPO_ROOT/deployment/common/load_profile.sh"
+
 if [[ ! -d "$CLOUD_DIR" ]]; then
   echo "Error: cloud directory not found at $CLOUD_DIR" >&2
   exit 2
@@ -49,6 +53,7 @@ echo "  Repo root  : $REPO_ROOT"
 echo "  cwd        : $CLOUD_DIR  (gallery/ resolves here)"
 echo "  app-dir    : $REPO_ROOT  (cloud_backend importable)"
 echo "  args       : ${ARGS[*]}"
+echo "  profile    : ${HYBRID_PROFILE:-development}"
 echo "  storage    : ${CLOUD_STORAGE_DIR:-<repo>/cloud_storage}"
 echo "=================================================="
 

@@ -41,7 +41,14 @@ class AttendanceReportService:
                 continue
             reports.append(_summarize_lecture(lec_key, lecture_records))
 
-        log.info("attendance lecture reports built total=%d filter=%s", len(reports), lecture_id)
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "report_generated",
+            total=len(reports),
+            lecture_id=str(lecture_id) if lecture_id else None,
+        )
         return reports
 
     async def build_student_report(

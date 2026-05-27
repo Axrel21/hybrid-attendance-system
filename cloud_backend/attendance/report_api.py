@@ -6,12 +6,14 @@ import uuid
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud_backend.attendance.report_service import get_report_service
 from cloud_backend.attendance.schemas.report import (
     AttendanceLectureReport,
     AttendanceReportListResponse,
+    AttendanceStudentReport,
     AttendanceStudentReportResponse,
 )
 from cloud_backend.db.session import get_async_session
@@ -32,6 +34,8 @@ async def list_attendance_report(
     service = get_report_service()
     try:
         lectures = await service.build_lecture_reports(session)
+    except SQLAlchemyError:
+        return AttendanceReportListResponse(total=0, lectures=[])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return AttendanceReportListResponse(total=len(lectures), lectures=lectures)
@@ -49,6 +53,16 @@ async def get_attendance_student_report(
     service = get_report_service()
     try:
         student = await service.build_student_report(session, student_id=student_id)
+    except SQLAlchemyError:
+        student = AttendanceStudentReport(
+            student_id=student_id,
+            lectures=0,
+            confirmed=0,
+            manual_review=0,
+            insufficient_presence=0,
+            expired=0,
+            attendance_rate=0.0,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return AttendanceStudentReportResponse(student=student)
@@ -66,6 +80,11 @@ async def get_attendance_lecture_report(
     service = get_report_service()
     try:
         lectures = await service.build_lecture_reports(session, lecture_id=lecture_id)
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No report data for lecture {lecture_id}",
+        ) from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

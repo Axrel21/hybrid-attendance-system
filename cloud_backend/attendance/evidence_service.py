@@ -57,7 +57,14 @@ class AttendanceEvidenceService:
             records.append(record)
 
         get_evidence_store().replace(records)
-        log.info("attendance evidence built total=%d lecture_id=%s", len(records), lecture_id)
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "evidence_generated",
+            total=len(records),
+            lecture_id=str(lecture_id) if lecture_id else None,
+        )
         return records
 
     async def _correlate_entry(

@@ -22,6 +22,10 @@ class AttendanceEvidenceStore:
                 return list(self._records)
             return [r for r in self._records if r.lecture_id == lecture_id]
 
+    def record_count(self) -> int:
+        with self._lock:
+            return len(self._records)
+
 
 _store = AttendanceEvidenceStore()
 

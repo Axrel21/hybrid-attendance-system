@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud_backend.attendance.evidence_service import get_evidence_service
@@ -28,6 +29,8 @@ async def _build_response(
     service = get_evidence_service()
     try:
         records = await service.build_records(session, lecture_id=lecture_id)
+    except SQLAlchemyError:
+        return AttendanceEvidenceListResponse(total=0, records=[])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

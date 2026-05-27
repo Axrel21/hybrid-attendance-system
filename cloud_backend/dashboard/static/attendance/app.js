@@ -6,10 +6,15 @@ const API = {
   records: (id) => `/attendance/lectures/${id}/records`,
   events: (id) => `/attendance/lectures/${id}/events`,
   logs: (id) => `/attendance/recognition/logs?lecture_id=${id}&limit=50`,
+  health: "/health",
+  healthAttendance: "/health/attendance",
+  config: "/system/config",
+  report: "/attendance/report",
 };
 
 let selectedLectureId = null;
 let pollTimer = null;
+let systemMeta = { profile: "—", ready: false, reportTotal: 0 };
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -38,10 +43,29 @@ async function fetchJson(url) {
 
 function setStatus(ok, msg) {
   const meta = $("#status-meta");
-  $("#status-text").textContent = msg;
-  meta.classList.toggle("error", !ok);
+  const suffix = ` · ${systemMeta.profile} · reports ${systemMeta.reportTotal}`;
+  $("#status-text").textContent = msg + suffix;
+  meta.classList.toggle("error", !ok || !systemMeta.ready);
   if (ok) {
     $("#last-refresh").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }
+}
+
+async function refreshSystem() {
+  const [health, config, report] = await Promise.allSettled([
+    fetchJson(API.health),
+    fetchJson(API.config),
+    fetchJson(API.report),
+  ]);
+  if (health.status === "fulfilled") {
+    systemMeta.ready = Boolean(health.value.ready);
+    systemMeta.profile = health.value.profile || systemMeta.profile;
+  }
+  if (config.status === "fulfilled") {
+    systemMeta.profile = config.value.profile || systemMeta.profile;
+  }
+  if (report.status === "fulfilled") {
+    systemMeta.reportTotal = report.value.total ?? 0;
   }
 }
 
@@ -185,10 +209,12 @@ async function refreshDetail() {
 
 async function refresh() {
   try {
+    await refreshSystem();
     const overview = await fetchJson(API.activeClassrooms);
     renderOverview(overview);
     await refreshDetail();
-    setStatus(true, "Live · polling every 5s");
+    const live = systemMeta.ready ? "Live" : "Degraded";
+    setStatus(true, `${live} · polling every 5s`);
   } catch (err) {
     console.error(err);
     setStatus(false, `Error: ${err.message}`);

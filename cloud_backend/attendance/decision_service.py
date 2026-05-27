@@ -49,10 +49,13 @@ class AttendanceDecisionService:
             decisions.append(self._decide(eligibility, confidence))
 
         decisions.sort(key=lambda record: (record.lecture_id or "", record.student_id))
-        log.info(
-            "attendance decisions built total=%d lecture_id=%s",
-            len(decisions),
-            lecture_id,
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "decision_generated",
+            total=len(decisions),
+            lecture_id=str(lecture_id) if lecture_id else None,
         )
         return decisions
 

@@ -54,7 +54,14 @@ class AttendanceFinalizationService:
                         for state in states
                     ]
                     get_finalization_store().set(lec_key, frozen)
-                    log.info("lecture finalized and states frozen lecture_id=%s count=%d", lec_key, len(frozen))
+                    from cloud_backend.system.observability import log_event
+
+                    log_event(
+                        log,
+                        "finalization_frozen",
+                        lecture_id=lec_key,
+                        count=len(frozen),
+                    )
                 results.extend(frozen)
             else:
                 results.extend(
@@ -66,7 +73,14 @@ class AttendanceFinalizationService:
             results = [record for record in results if record.lecture_id == lecture_key]
 
         results.sort(key=lambda record: (record.lecture_id or "", record.student_id))
-        log.info("attendance finalized built total=%d lecture_id=%s", len(results), lecture_id)
+        from cloud_backend.system.observability import log_event
+
+        log_event(
+            log,
+            "finalization_generated",
+            total=len(results),
+            lecture_id=str(lecture_id) if lecture_id else None,
+        )
         return results
 
 

@@ -34,11 +34,16 @@ import os
 import sys
 from pathlib import Path
 
+from cloud_backend.system.settings import get_settings, load_settings
+
+load_settings()
+
 from fastapi import FastAPI
 
 log = logging.getLogger("cloud_backend.server")
+_settings = get_settings()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _settings.log_level, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
@@ -89,6 +94,7 @@ from cloud_backend.attendance.decision_api import router as decision_router  # n
 from cloud_backend.attendance.state_api import router as state_router  # noqa: E402
 from cloud_backend.attendance.finalization_api import router as finalization_router  # noqa: E402
 from cloud_backend.attendance.report_api import router as report_router  # noqa: E402
+from cloud_backend.system.api import register_exception_handlers, router as system_router  # noqa: E402
 from cloud_backend.dashboard import websocket as ws_module  # noqa: E402
 from cloud_backend.dashboard.attendance_ui import (  # noqa: E402
     register_static_mount,
@@ -110,6 +116,8 @@ app.include_router(decision_router)
 app.include_router(state_router)
 app.include_router(finalization_router)
 app.include_router(report_router)
+app.include_router(system_router)
+register_exception_handlers(app)
 ws_module.register(app)
 
 
@@ -119,6 +127,7 @@ def backend_info() -> dict:
     storage = get_default_storage()
     return {
         "app": "cloud_backend.server",
+        "profile": _settings.profile,
         "verification_routes_present": _has_route(app, "/verify/image"),
         "telemetry_routes_present": _has_route(app, "/telemetry/ingest"),
         "dashboard_routes_present": _has_route(app, "/api/sessions"),
@@ -126,6 +135,8 @@ def backend_info() -> dict:
         "recognition_route_present": _has_route(app, "/attendance/recognition/events"),
         "visibility_routes_present": _has_route(app, "/attendance/lectures/active"),
         "attendance_dashboard_present": _has_route(app, "/dashboard/attendance"),
+        "health_routes_present": _has_route(app, "/health"),
+        "config_route_present": _has_route(app, "/system/config"),
         "ws_subscribers": ws_module.subscriber_count(),
         "storage_root": str(storage.root),
         "storage_dir_override": os.environ.get("CLOUD_STORAGE_DIR"),

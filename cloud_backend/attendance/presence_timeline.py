@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import time
+
+from cloud_backend.system.settings import get_settings
 from dataclasses import dataclass
 from typing import Literal
 
@@ -35,11 +36,7 @@ class PresenceSession:
 
 
 def _default_timeout_ms() -> int:
-    raw = os.environ.get("PRESENCE_SESSION_TIMEOUT_S", "45")
-    try:
-        seconds = float(raw)
-    except ValueError:
-        seconds = 45.0
+    seconds = get_settings().attendance.presence_session_timeout_s
     return max(5, int(seconds * 1000))
 
 

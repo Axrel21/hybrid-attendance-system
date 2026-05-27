@@ -847,3 +847,27 @@ python3 -m compileall cloud_backend/attendance
 **Lecture closure:** finalize lecture via existing session API, then `GET /attendance/finalized/{lecture_id}` — expect `finalized: true` and `candidate` → `expired`.
 
 **Rollback:** remove `finalization_router` from `server.py`; delete `finalization_*.py`, `schemas/finalized.py`.
+
+---
+
+## D5 Track 4 — Attendance Reporting (dashboard APIs)
+
+**AttendanceReportService** aggregates finalized (or live) derived states for the **existing** dashboard to poll. No new frontend, no ORM writes.
+
+### APIs (dashboard consumption)
+
+```bash
+curl -s http://localhost:8000/attendance/report | python3 -m json.tool
+curl -s http://localhost:8000/attendance/report/{lecture_id} | python3 -m json.tool
+curl -s http://localhost:8000/attendance/report/student/{student_id} | python3 -m json.tool
+```
+
+Uses finalized states when lecture is `finalized`; otherwise live snapshot from the finalization layer.
+
+### D5 Track 4 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance cloud_backend/dashboard
+```
+
+**Rollback:** remove `report_router` from `server.py`; delete `report_*.py`, `schemas/report.py`, `dashboard/report_proxy.py`.

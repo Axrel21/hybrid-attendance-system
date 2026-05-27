@@ -8,9 +8,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import os
-
 from cloud_backend.models.camera_source import CameraSource
+from cloud_backend.system.settings import get_settings
 from cloud_backend.models.lecture import Lecture
 from cloud_backend.models.recognition_event_log import RecognitionEventLog
 from cloud_backend.models.student import Student
@@ -65,15 +64,11 @@ def surveillance_camera_ids_for_classroom(
     if registered:
         return registered
 
-    if os.environ.get("EVIDENCE_PRESENCE_CAMERA_FALLBACK", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
-        "off",
-    ):
+    settings = get_settings().attendance
+    if not settings.evidence_presence_camera_fallback:
         return []
 
-    explicit = os.environ.get("EVIDENCE_SURVEILLANCE_CAMERA_IDS", "").strip()
+    explicit = settings.evidence_surveillance_camera_ids
     if explicit:
         return [camera.strip() for camera in explicit.split(",") if camera.strip()]
 
