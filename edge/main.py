@@ -73,6 +73,7 @@ from edge.stabilization import (
     PADSpoofStreakSmoother,
     SimEMASmoother,
 )
+from edge.lighting import assess_lighting
 from edge.utils import is_valid_face
 
 
@@ -239,6 +240,8 @@ DIAG_COLUMNS = [
     "yunet_cadence_skip",  # 1 when detection was reused from cache; 0 otherwise
     # --- attendance orchestration bridge (D.2B) ---
     "attendance_sent", "attendance_disposition", "attendance_rtt_ms", "attendance_accepted",
+    # --- frame illumination ---
+    "illum_level", "illum_mean", "illum_contrast", "dark_ratio",
 ]
 
 
@@ -628,6 +631,11 @@ class FinalHybridEdge:
             dbg.get("attendance_disposition"),
             dbg.get("attendance_rtt_ms"),
             dbg.get("attendance_accepted"),
+            # frame illumination
+            dbg.get("illum_level"),
+            round(float(dbg.get("illum_mean", 0.0)), 1),
+            round(float(dbg.get("illum_contrast", 0.0)), 1),
+            round(float(dbg.get("dark_ratio", 0.0)), 4),
         ])
 
     # ------------------------------------------------------------------
@@ -659,6 +667,8 @@ class FinalHybridEdge:
             t_capture_ms = (time.perf_counter() - t0) * 1000.0
             if not ret:
                 break
+
+            lighting = assess_lighting(frame)
 
             # One authoritative h, w per frame (duplicate removed — minor fix)
             h, w = frame.shape[:2]
@@ -803,6 +813,10 @@ class FinalHybridEdge:
                     "attendance_disposition":   None,
                     "attendance_rtt_ms":        None,
                     "attendance_accepted":      None,
+                    "illum_level":    lighting["level"],
+                    "illum_mean":     lighting["mean"],
+                    "illum_contrast": lighting["contrast"],
+                    "dark_ratio":     lighting["dark_ratio"],
                 }
 
                 try:
@@ -1114,6 +1128,13 @@ class FinalHybridEdge:
                         self._write_diag(loop_start, w, h, track_id, dbg)
 
             t_tracks_ms = (time.perf_counter() - t_tracks_start) * 1000.0
+
+            if self._show_overlay:
+                light_line = f"LIGHT: {lighting['level']} ({int(round(lighting['mean'])))})"
+                cv2.putText(
+                    frame, light_line, (10, h - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1,
+                )
 
             prev_gray = curr_gray.copy()
 
