@@ -30,8 +30,53 @@ from cloud_backend.schemas import (
     TelemetryBatch,
 )
 from cloud_backend.storage import get_default_storage
+from cloud_backend.system.observability import log_ops
 
 log = logging.getLogger("cloud_backend.telemetry")
+
+
+def _edge_runtime_snapshot(events: list[dict[str, Any]]) -> str | None:
+    """Compact runtime line from the tail of an ingest batch."""
+    node = "edge"
+    temp = None
+    fan = None
+    offload_count = 0
+    diag_count = 0
+
+    for ev in reversed(events[-20:]):
+        fields = ev.get("fields") if isinstance(ev.get("fields"), dict) else {}
+        event_type = ev.get("event_type") or ""
+        if event_type in ("frame_telemetry", "telemetry"):
+            if temp is None:
+                try:
+                    value = float(fields.get("cpu_temp_c") or 0)
+                    if value > 0:
+                        temp = value
+                except (TypeError, ValueError):
+                    pass
+            if fan is None and fields.get("fan_state"):
+                fan = str(fields.get("fan_state")).strip()
+        if event_type == "diagnostic":
+            diag_count += 1
+            if fields.get("decision") == "OFFLOAD_TO_CLOUD":
+                offload_count += 1
+
+    if temp is None and fan is None and diag_count == 0:
+        return None
+
+    offload_pct = round((offload_count / diag_count) * 100) if diag_count else None
+    parts = [node]
+    if temp is not None:
+        parts.append(f"temp={temp:.0f}C")
+    if fan:
+        parts.append(f"fan={fan.upper()}")
+    if offload_pct is not None:
+        parts.append(f"offload={offload_pct}%")
+    return " ".join(parts)
+
+
+def _device_label(device_id: str | None, session_id: str) -> str:
+    return device_id or session_id
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
@@ -54,10 +99,8 @@ async def telemetry_session_start(req: SessionStartRequest) -> SessionAck:
         sdir = storage.record_session_start(req.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    log.info(
-        "session_start session_id=%s experiment_label=%r device=%s",
-        req.session_id, req.experiment_label, req.device_id,
-    )
+    device = _device_label(req.device_id, req.session_id)
+    log_ops(log, "EDGE", f"Node online: {device} session={req.session_id}")
     return SessionAck(
         session_id=req.session_id,
         accepted=True,
@@ -73,11 +116,7 @@ async def telemetry_session_end(req: SessionEndRequest) -> SessionAck:
         path = storage.record_session_end(req.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    log.info(
-        "session_end session_id=%s ended_at=%s summary_keys=%s",
-        req.session_id, req.ended_at,
-        list((req.summary or {}).keys()),
-    )
+    log_ops(log, "EDGE", f"Node offline: session={req.session_id}")
     return SessionAck(
         session_id=req.session_id,
         accepted=True,
@@ -108,10 +147,32 @@ async def telemetry_ingest(batch: TelemetryBatch) -> IngestAck:
     except Exception:  # noqa: BLE001
         log.exception("WS broadcast failed (ingest still succeeded)")
 
-    log.debug(
-        "ingest session_id=%s received=%d persisted=%d",
-        batch.session_id, len(serialised), persisted,
-    )
+    snapshot = _edge_runtime_snapshot(serialised)
+    if snapshot:
+        detail = storage.get_session(batch.session_id) or {}
+        meta = detail.get("metadata") or {}
+        node = _device_label(meta.get("device_id"), batch.session_id)
+        line = snapshot.replace("edge", node, 1)
+        temp_value = None
+        for ev in reversed(serialised[-20:]):
+            fields = ev.get("fields") if isinstance(ev.get("fields"), dict) else {}
+            try:
+                temp_value = float(fields.get("cpu_temp_c") or 0)
+            except (TypeError, ValueError):
+                temp_value = None
+            if temp_value and temp_value > 0:
+                break
+        if temp_value and temp_value >= 75:
+            log_ops(log, "EDGE", f"{line} state=degraded", level=logging.WARNING)
+        elif temp_value and temp_value >= 65:
+            log_ops(log, "EDGE", f"{line} state=warning", level=logging.WARNING)
+        else:
+            log_ops(log, "EDGE", line)
+    else:
+        log.debug(
+            "ingest session_id=%s received=%d persisted=%d",
+            batch.session_id, len(serialised), persisted,
+        )
 
     return IngestAck(
         session_id=batch.session_id,

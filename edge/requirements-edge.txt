@@ -39,3 +39,9 @@ matplotlib>=3.7.0
 
 requests>=2.31.0
 urllib3>=2.0.0
+
+# --- Thermal fan config (config/settings.yaml) ---
+PyYAML>=6.0
+
+# --- Optional: GPIO fan output on Raspberry Pi (no-op if import fails) ---
+# RPi.GPIO>=0.7.1

@@ -150,6 +150,7 @@ activemq-data/
 # Environments
 .env
 .envrc
+deployment/env/local.env
 .venv
 cloud/.venv/
 env/
@@ -258,4 +259,6 @@ cloud_storage/
 
 # OS junk
 .DS_Store
-Thumbs.db
+Thumbs.dbexperiments/
+
+experiments/

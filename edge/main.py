@@ -73,6 +73,7 @@ from edge.stabilization import (
     PADSpoofStreakSmoother,
     SimEMASmoother,
 )
+from edge.lighting import assess_lighting
 from edge.utils import is_valid_face
 
 
@@ -80,6 +81,9 @@ from edge.utils import is_valid_face
 from edge.cloud_client import CloudVerificationClient, OffloadOutcome
 from edge.offload_router import create_router
 from edge.attendance_client import AttendanceIngestionClient, resolve_attendance_api_url
+from edge.thermal.fan_controller import FanController, load_thermal_config
+from edge.thermal.temperature_reader import TemperatureReader
+from edge.observability import ExperimentObservability
 
 # -----------------------------------------------------------------
 # Absolute paths — derived from this file's location.
@@ -98,17 +102,6 @@ def _artifact_paths():
     if p is None:
         p = experiment_session.init_experiment_session(_PROJECT_ROOT)
     return p
-
-
-# =================================================================
-# Helper: CPU temperature (Pi sysfs; 0.0 on non-Pi / non-Linux)
-# =================================================================
-def _read_cpu_temp() -> float:
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp") as f:
-            return int(f.read().strip()) / 1000.0
-    except Exception:
-        return 0.0
 
 
 # =================================================================
@@ -248,6 +241,8 @@ DIAG_COLUMNS = [
     "yunet_cadence_skip",  # 1 when detection was reused from cache; 0 otherwise
     # --- attendance orchestration bridge (D.2B) ---
     "attendance_sent", "attendance_disposition", "attendance_rtt_ms", "attendance_accepted",
+    # --- frame illumination ---
+    "illum_level", "illum_mean", "illum_contrast", "dark_ratio",
 ]
 
 
@@ -421,6 +416,13 @@ class FinalHybridEdge:
         self._cpu_pct      = 0.0
         self._mem_mb       = 0.0
         self._cpu_temp_c   = 0.0
+        self._fan_state    = "OFF"
+        self._last_fan_sample_t = 0.0
+        self._temp_reader  = TemperatureReader()
+        self._fan_controller = FanController(load_thermal_config())
+        self._fan_state = self._fan_controller.get_state()
+        self._experiment_obs = ExperimentObservability()
+        self._experiment_obs.configure_cloud_poll(_cloud_url)
         if _PSUTIL_AVAILABLE:
             self._psutil_proc = _psutil.Process()
 
@@ -549,6 +551,13 @@ class FinalHybridEdge:
         )
         self._attendance_ingest_cooldowns[identity] = now
         dbg.update(result.to_diag_dict())
+        self._experiment_obs.apply_attendance_ingest(
+            from_state=result.from_state,
+            to_state=result.to_state,
+            lecture_id=result.lecture_id,
+            disposition=result.disposition,
+            detail=result.detail,
+        )
 
     # ------------------------------------------------------------------
     def _draw_overlay(self, frame, x, y, fw, fh, track_id, dbg):
@@ -632,6 +641,11 @@ class FinalHybridEdge:
             dbg.get("attendance_disposition"),
             dbg.get("attendance_rtt_ms"),
             dbg.get("attendance_accepted"),
+            # frame illumination
+            dbg.get("illum_level"),
+            round(float(dbg.get("illum_mean", 0.0)), 1),
+            round(float(dbg.get("illum_contrast", 0.0)), 1),
+            round(float(dbg.get("dark_ratio", 0.0)), 4),
         ])
 
     # ------------------------------------------------------------------
@@ -663,6 +677,8 @@ class FinalHybridEdge:
             t_capture_ms = (time.perf_counter() - t0) * 1000.0
             if not ret:
                 break
+
+            lighting = assess_lighting(frame)
 
             # One authoritative h, w per frame (duplicate removed — minor fix)
             h, w = frame.shape[:2]
@@ -725,12 +741,26 @@ class FinalHybridEdge:
                 max(1e-9, self._fps_times[-1] - self._fps_times[0])
             ) if len(self._fps_times) >= 2 else 0.0
 
+            # ---- Fan control + temperature (every THERMAL_FAN_INTERVAL_S wall seconds) ----
+            if loop_start - self._last_fan_sample_t >= settings.THERMAL_FAN_INTERVAL_S:
+                self._last_fan_sample_t = loop_start
+                _temp = self._temp_reader.read_temp_c()
+                if _temp is not None:
+                    self._cpu_temp_c = _temp
+                self._fan_state = self._fan_controller.update(_temp)
+                self._experiment_obs.maybe_poll_cloud_presence(loop_start)
+
+            # ---- Unified experiment observability (per frame) ----
+            self._experiment_obs.reset_frame()
+
             # ---- System resource sampling (every PERF_SAMPLE_INTERVAL frames) ----
             self._frame_count += 1
             if _PSUTIL_AVAILABLE and self._frame_count % settings.PERF_SAMPLE_INTERVAL == 0:
                 self._cpu_pct    = _psutil.cpu_percent(interval=None)
                 self._mem_mb     = self._psutil_proc.memory_info().rss / 1e6
-                self._cpu_temp_c = _read_cpu_temp()
+                _t = self._temp_reader.read_temp_c()
+                if _t is not None:
+                    self._cpu_temp_c = _t
                 if (
                     settings.THERMAL_WARN_C > 0
                     and self._cpu_temp_c >= settings.THERMAL_WARN_C
@@ -797,6 +827,10 @@ class FinalHybridEdge:
                     "attendance_disposition":   None,
                     "attendance_rtt_ms":        None,
                     "attendance_accepted":      None,
+                    "illum_level":    lighting["level"],
+                    "illum_mean":     lighting["mean"],
+                    "illum_contrast": lighting["contrast"],
+                    "dark_ratio":     lighting["dark_ratio"],
                 }
 
                 try:
@@ -1002,7 +1036,9 @@ class FinalHybridEdge:
                         dbg["decision"] = "OFFLOAD_TO_CLOUD"
  
                         routing = self.offload_router.decide(edge_confidence=sim)
- 
+                        dbg["_routing_reason"] = routing.reason
+                        dbg["_routing_should_offload"] = routing.should_offload
+
                         if routing.should_offload and self.cloud_client.is_healthy() and aligned is not None:
                             cloud_result = self.cloud_client.verify(
                                 face_crop_bgr=aligned,
@@ -1085,6 +1121,13 @@ class FinalHybridEdge:
                     ])
 
                 finally:
+                    self._experiment_obs.observe_track(
+                        dbg,
+                        routing_reason=dbg.get("_routing_reason"),
+                        routing_should_offload=dbg.get("_routing_should_offload"),
+                        frame_latency_ms=(time.time() - loop_start) * 1000.0,
+                        latency_budget_ms=float(settings.TARGET_LATENCY_MS),
+                    )
                     max_tl = max(max_tl, float(dbg["t_liveness_ms"]))
                     max_te = max(max_te, float(dbg["t_embed_ms"]))
                     max_tm = max(max_tm, float(dbg["t_match_ms"]))
@@ -1108,6 +1151,13 @@ class FinalHybridEdge:
                         self._write_diag(loop_start, w, h, track_id, dbg)
 
             t_tracks_ms = (time.perf_counter() - t_tracks_start) * 1000.0
+
+            if self._show_overlay:
+                light_line = f"LIGHT: {lighting['level']} ({int(round(lighting['mean']))})"
+                cv2.putText(
+                    frame, light_line, (10, h - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1,
+                )
 
             prev_gray = curr_gray.copy()
 
@@ -1183,13 +1233,14 @@ class FinalHybridEdge:
                     round(self._cpu_pct, 1),
                     round(self._mem_mb, 1),
                     round(self._cpu_temp_c, 1),
+                    self._fan_state,
                     len(objects),
                     len(valid_faces),
                     raw_count,
                     kept_count,
                     round(max_live, 3),
                     round(max_sim, 3),
-                ])
+                ] + self._experiment_obs.frame_row_values())
 
             # ---- P6 fix: periodic CSV flush (SD-card I/O coalescing) ----
             if self._frame_count % settings.LOG_FLUSH_INTERVAL == 0:
@@ -1200,6 +1251,7 @@ class FinalHybridEdge:
 
         # ---- Cleanup ----
         LOG_RUNTIME.info("Pipeline shutdown (closing camera and log files).")
+        self._fan_controller.cleanup()
         cap.release()
         if not settings.HEADLESS:
             cv2.destroyAllWindows()

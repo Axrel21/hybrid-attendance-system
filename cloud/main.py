@@ -251,11 +251,18 @@ async def verify_image(
     )
 
     log.info(
-        f"[{request_id}] session={session_id} frame={frame_id} "
-        f"identity={response.identity} score={arcface_score:.4f} "
-        f"verified={verified} agree={edge_cloud_agree} "
-        f"decode={image_decode_ms:.1f}ms extract={arcface_extract_ms:.1f}ms "
-        f"search={gallery_search_ms:.1f}ms total={server_total_ms:.1f}ms"
+        "[RECOGNITION] ArcFace verify: identity=%s conf=%.2f verified=%s agree=%s "
+        "decode=%.0fms extract=%.0fms search=%.0fms total=%.0fms session=%s frame=%s",
+        response.identity,
+        arcface_score,
+        verified,
+        edge_cloud_agree,
+        image_decode_ms,
+        arcface_extract_ms,
+        gallery_search_ms,
+        server_total_ms,
+        session_id,
+        frame_id,
     )
 
     return response

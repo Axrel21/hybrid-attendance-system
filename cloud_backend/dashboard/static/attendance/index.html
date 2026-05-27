@@ -17,19 +17,96 @@
   </header>
 
   <main>
-    <section>
-      <h2>Active classrooms</h2>
-      <div id="overview-grid" class="overview-grid"></div>
-      <p id="overview-empty" class="empty" hidden>No active lectures. Start a lecture via the API to see data here.</p>
+    <section class="section-block section-primary surveillance-summary">
+      <h2>Surveillance summary</h2>
+      <div class="summary-cards">
+        <div class="summary-card">
+          <span class="summary-label">Active tracks</span>
+          <span class="summary-value" id="sum-active-tracks">—</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Observed students</span>
+          <span class="summary-value" id="sum-observed-students">—</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Presence coverage</span>
+          <span class="summary-value" id="sum-presence-coverage">—</span>
+        </div>
+      </div>
     </section>
 
-    <section id="detail" class="detail">
+    <section class="section-block section-primary edge-runtime-section">
+      <h2>Edge runtime status</h2>
+      <div id="edge-runtime-grid" class="edge-runtime-grid"></div>
+      <div id="edge-runtime-empty" class="empty empty-state-block" hidden>
+        <span class="empty-state-title">No runtime telemetry</span>
+        <span class="empty-state-hint">Edge nodes appear when sessions upload to the cloud backend.</span>
+      </div>
+    </section>
+
+    <section class="section-block section-primary classrooms-section">
+      <div class="section-head">
+        <h2>Active classrooms</h2>
+        <button type="button" id="btn-create-lecture" class="btn btn-primary">+ Create Lecture</button>
+      </div>
+      <div id="overview-grid" class="overview-grid"></div>
+      <div id="overview-empty" class="empty empty-state-block" hidden>
+        <span class="empty-state-title">No scheduled or active lectures</span>
+        <span class="empty-state-hint">Create a lecture to begin attendance operations.</span>
+      </div>
+    </section>
+
+    <section class="section-block section-secondary surveillance-panels">
+      <article class="panel panel-wide">
+        <div class="panel-head">Surveillance presence</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Track</th>
+                <th>Camera</th>
+                <th>Duration</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="presence-body"></tbody>
+          </table>
+        </div>
+        <p id="presence-empty" class="panel-empty empty-state-inline" hidden>
+          <span class="empty-state-title">No active occupancy</span>
+        </p>
+      </article>
+    </section>
+
+    <section id="detail" class="detail section-block section-secondary">
       <div class="detail-header">
         <h2 id="detail-title">Lecture detail</h2>
         <p id="detail-sub" class="sub"></p>
       </div>
 
       <div class="panels">
+        <article class="panel">
+          <div class="panel-head">Presence evidence</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Evidence</th>
+                  <th>Conf</th>
+                  <th>Track</th>
+                  <th>Duration</th>
+                  <th>Δt</th>
+                </tr>
+              </thead>
+              <tbody id="evidence-body"></tbody>
+            </table>
+          </div>
+          <p id="evidence-empty" class="panel-empty empty-state-inline" hidden>
+            <span class="empty-state-title">No surveillance evidence</span>
+          </p>
+        </article>
+
         <article class="panel">
           <div class="panel-head">Student attendance</div>
           <div class="table-wrap">
@@ -46,6 +123,9 @@
               <tbody id="records-body"></tbody>
             </table>
           </div>
+          <p id="records-empty" class="panel-empty empty-state-inline" hidden>
+            <span class="empty-state-title">No attendance records</span>
+          </p>
         </article>
 
         <article class="panel">
@@ -64,6 +144,9 @@
               <tbody id="events-body"></tbody>
             </table>
           </div>
+          <p id="events-empty" class="panel-empty empty-state-inline" hidden>
+            <span class="empty-state-title">No attendance transitions</span>
+          </p>
         </article>
 
         <article class="panel panel-wide">
@@ -83,10 +166,75 @@
               <tbody id="logs-body"></tbody>
             </table>
           </div>
+          <p id="logs-empty" class="panel-empty empty-state-inline" hidden>
+            <span class="empty-state-title">No recognition events</span>
+          </p>
         </article>
       </div>
     </section>
   </main>
+
+  <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+
+  <div id="finalize-modal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-dismiss="finalize-modal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-labelledby="finalize-modal-title" aria-modal="true">
+      <div class="modal-header">
+        <h3 id="finalize-modal-title">Finalize lecture</h3>
+        <button type="button" class="modal-close" data-dismiss="finalize-modal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="finalize-modal-text">Finalize this lecture? It will be removed from active dashboard views. Historical attendance and evidence records are preserved.</p>
+      </div>
+      <div class="modal-actions modal-actions-padded">
+        <button type="button" class="btn btn-ghost" data-dismiss="finalize-modal">Cancel</button>
+        <button type="button" id="finalize-confirm" class="btn btn-danger">Finalize</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="create-modal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-dismiss="create-modal"></div>
+    <div class="modal-dialog" role="dialog" aria-labelledby="create-modal-title" aria-modal="true">
+      <div class="modal-header">
+        <h3 id="create-modal-title">Create Lecture</h3>
+        <button type="button" class="modal-close" data-dismiss="create-modal" aria-label="Close">&times;</button>
+      </div>
+      <form id="create-lecture-form" class="modal-form">
+        <div class="form-row">
+          <label for="create-subject">Subject</label>
+          <select id="create-subject" name="subject_id" required>
+            <option value="">Select subject…</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="create-classroom">Classroom</label>
+          <select id="create-classroom" name="classroom_id" required>
+            <option value="">Select classroom…</option>
+          </select>
+        </div>
+        <div class="form-row form-row-split">
+          <div>
+            <label for="create-start">Start</label>
+            <input type="datetime-local" id="create-start" name="scheduled_start" required />
+          </div>
+          <div>
+            <label for="create-end">End</label>
+            <input type="datetime-local" id="create-end" name="scheduled_end" required />
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="create-window">Attendance window (minutes)</label>
+          <input type="number" id="create-window" name="attendance_window_minutes" min="1" max="240" value="15" required />
+        </div>
+        <p id="create-form-hint" class="form-hint" hidden>No subjects found. Create a lecture via API first or seed the database.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-dismiss="create-modal">Cancel</button>
+          <button type="submit" id="create-submit" class="btn btn-primary">Create Lecture</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="/dashboard/attendance/static/app.js"></script>
 </body>

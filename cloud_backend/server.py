@@ -34,14 +34,19 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+from cloud_backend.system.settings import get_settings, load_settings
+
+load_settings()
+
+from fastapi import FastAPI, Request
+
+from cloud_backend.system.logging_config import configure_server_logging, is_polling_path, is_verbose_http
 
 log = logging.getLogger("cloud_backend.server")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
+_settings = get_settings()
+configure_server_logging(level=_settings.log_level)
+
+_access_log = logging.getLogger("cloud_backend.access")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CLOUD_DIR = _REPO_ROOT / "cloud"
@@ -76,12 +81,36 @@ def _load_verification_app() -> "FastAPI":
 
 app: "FastAPI" = _load_verification_app()
 
+
+@app.middleware("http")
+async def operational_access_log(request: Request, call_next):
+    """Optional HTTP access lines when HYBRID_VERBOSE_HTTP=true (non-polling only)."""
+    response = await call_next(request)
+    if is_verbose_http():
+        path = request.url.path
+        if not is_polling_path(request.method, path):
+            _access_log.info(
+                "%s %s → %s",
+                request.method,
+                path,
+                response.status_code,
+            )
+    return response
+
 # Late imports: these need fastapi but no cv2 / insightface.
 from cloud_backend.telemetry.api import router as telemetry_router  # noqa: E402
 from cloud_backend.dashboard.api import router as dashboard_router  # noqa: E402
 from cloud_backend.api.visibility import router as attendance_visibility_router  # noqa: E402
 from cloud_backend.api.lectures import router as attendance_lectures_router  # noqa: E402
 from cloud_backend.api.recognition import router as recognition_router  # noqa: E402
+from cloud_backend.attendance.presence_api import router as presence_router  # noqa: E402
+from cloud_backend.attendance.evidence_api import router as evidence_router  # noqa: E402
+from cloud_backend.attendance.eligibility_api import router as eligibility_router  # noqa: E402
+from cloud_backend.attendance.decision_api import router as decision_router  # noqa: E402
+from cloud_backend.attendance.state_api import router as state_router  # noqa: E402
+from cloud_backend.attendance.finalization_api import router as finalization_router  # noqa: E402
+from cloud_backend.attendance.report_api import router as report_router  # noqa: E402
+from cloud_backend.system.api import register_exception_handlers, router as system_router  # noqa: E402
 from cloud_backend.dashboard import websocket as ws_module  # noqa: E402
 from cloud_backend.dashboard.attendance_ui import (  # noqa: E402
     register_static_mount,
@@ -96,6 +125,15 @@ register_static_mount(app)
 app.include_router(attendance_visibility_router)
 app.include_router(attendance_lectures_router)
 app.include_router(recognition_router)
+app.include_router(presence_router)
+app.include_router(evidence_router)
+app.include_router(eligibility_router)
+app.include_router(decision_router)
+app.include_router(state_router)
+app.include_router(finalization_router)
+app.include_router(report_router)
+app.include_router(system_router)
+register_exception_handlers(app)
 ws_module.register(app)
 
 
@@ -105,6 +143,7 @@ def backend_info() -> dict:
     storage = get_default_storage()
     return {
         "app": "cloud_backend.server",
+        "profile": _settings.profile,
         "verification_routes_present": _has_route(app, "/verify/image"),
         "telemetry_routes_present": _has_route(app, "/telemetry/ingest"),
         "dashboard_routes_present": _has_route(app, "/api/sessions"),
@@ -112,6 +151,8 @@ def backend_info() -> dict:
         "recognition_route_present": _has_route(app, "/attendance/recognition/events"),
         "visibility_routes_present": _has_route(app, "/attendance/lectures/active"),
         "attendance_dashboard_present": _has_route(app, "/dashboard/attendance"),
+        "health_routes_present": _has_route(app, "/health"),
+        "config_route_present": _has_route(app, "/system/config"),
         "ws_subscribers": ws_module.subscriber_count(),
         "storage_root": str(storage.root),
         "storage_dir_override": os.environ.get("CLOUD_STORAGE_DIR"),
@@ -126,7 +167,9 @@ def _has_route(application: "FastAPI", path: str) -> bool:
 
 
 log.info(
-    "cloud_backend.server ready: telemetry=%d dashboard=%d visibility=%d attendance=%d recognition=%d",
+    "Backend ready profile=%s verbose_http=%s telemetry=%d dashboard=%d visibility=%d attendance=%d recognition=%d",
+    _settings.profile,
+    is_verbose_http(),
     sum(1 for _ in telemetry_router.routes),
     sum(1 for _ in dashboard_router.routes),
     sum(1 for _ in attendance_visibility_router.routes),

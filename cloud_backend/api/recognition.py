@@ -7,9 +7,14 @@ from collections.abc import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+
 from cloud_backend.attendance.ingestor import RecognitionIngestor
 from cloud_backend.attendance.schemas.recognition import IngestionResult, RecognitionEvent
 from cloud_backend.db.session import get_async_session
+from cloud_backend.system.observability import log_event
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
 
@@ -41,6 +46,18 @@ async def ingest_recognition_event(
             camera_id=payload.camera_id,
         )
         await session.commit()
+        log_event(
+            log,
+            "recognition_ingested",
+            accepted=result.accepted,
+            disposition=result.disposition,
+            gallery_identity=result.gallery_identity,
+            lecture_id=str(result.lecture_id) if result.lecture_id else None,
+            from_state=result.from_state,
+            to_state=result.to_state,
+            confidence=payload.confidence,
+            source=payload.source,
+        )
         return IngestionResult(
             accepted=result.accepted,
             disposition=result.disposition,

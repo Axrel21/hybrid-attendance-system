@@ -335,6 +335,89 @@ def generate_experiment_report(
         stats["cpu_temp_mean"] = None if np.isnan(ct_mean) else ct_mean
         stats["cpu_temp_max"] = float(tel["cpu_temp_c"].max())
 
+        if "fan_state" in tel.columns:
+            fs = tel["fan_state"].astype(str).str.strip()
+            fs = fs[fs != ""]
+            if len(fs) > 0:
+                stats["fan_state_last"] = str(fs.iloc[-1])
+                stats["fan_state_counts"] = {
+                    str(k): int(v) for k, v in fs.value_counts().items()
+                }
+
+            _fan_levels = {"OFF": 0, "LOW": 1, "HIGH": 2, "MAX": 3}
+            tel_fan = tel.copy()
+            tel_fan["_fan_level"] = (
+                tel_fan["fan_state"].astype(str).str.upper().map(_fan_levels)
+            )
+            valid_fan = tel_fan["_fan_level"].notna()
+
+            if valid_fan.any() and (tel_fan["cpu_temp_c"].astype(float) > 0).any():
+                fig, ax = plt.subplots(figsize=(9, 4))
+                ax.plot(
+                    tel_fan["_t_rel_s"],
+                    tel_fan["cpu_temp_c"],
+                    lw=0.8,
+                    color="#ff7f0e",
+                    label="CPU temp (°C)",
+                )
+                ax2 = ax.twinx()
+                ax2.step(
+                    tel_fan["_t_rel_s"],
+                    tel_fan["_fan_level"].fillna(0),
+                    where="post",
+                    lw=0.9,
+                    color="#1f77b4",
+                    alpha=0.75,
+                    label="Fan level",
+                )
+                ax2.set_yticks([0, 1, 2, 3])
+                ax2.set_yticklabels(["OFF", "LOW", "HIGH", "MAX"])
+                ax2.set_ylabel("Fan state")
+                _style_axes(ax, "Time (s from start)", "Temperature (°C)", "Fan state vs CPU temperature")
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "fan_vs_temp.png", plt)
+
+            tt_lat = tel_fan[
+                (tel_fan["cpu_temp_c"].astype(float) > 0) & tel_fan["t_total_ms"].notna()
+            ]
+            if len(tt_lat) > 1:
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.scatter(
+                    tt_lat["cpu_temp_c"],
+                    tt_lat["t_total_ms"],
+                    c=tt_lat["_t_rel_s"],
+                    cmap="plasma",
+                    s=12,
+                    alpha=0.65,
+                )
+                _style_axes(
+                    ax,
+                    "CPU temperature (°C)",
+                    "Total frame latency (ms)",
+                    "Temperature vs pipeline latency",
+                )
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "temp_vs_latency.png", plt)
+
+            tt_fps = tel_fan[
+                valid_fan & (tel_fan["fps_rolling"].astype(float) > 0)
+            ]
+            if len(tt_fps) > 1:
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.scatter(
+                    tt_fps["_fan_level"],
+                    tt_fps["fps_rolling"],
+                    c=tt_fps["_t_rel_s"],
+                    cmap="viridis",
+                    s=14,
+                    alpha=0.65,
+                )
+                ax.set_xticks([0, 1, 2, 3])
+                ax.set_xticklabels(["OFF", "LOW", "HIGH", "MAX"])
+                _style_axes(ax, "Fan state", "Rolling FPS", "Fan state vs throughput")
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "fan_vs_fps.png", plt)
+
         if "dt_ms" in tel.columns:
             dt = tel["dt_ms"].astype(float)
             dt_pos = dt[dt > 0]
@@ -344,6 +427,108 @@ def generate_experiment_report(
             stats["dropped_frames_heuristic"] = dropped
             stats["dropped_frame_threshold_ms"] = thr
             stats["median_frame_interval_ms"] = med
+
+        # --- D5 unified experiment observability ---
+        from edge.observability import (
+            compute_experiment_health_score,
+            summarize_telemetry_columns,
+        )
+
+        unified = summarize_telemetry_columns(tel)
+        stats.update(unified)
+
+        try:
+            from config import settings as _settings
+
+            stats["latency_target_ms"] = float(
+                _settings.TARGET_LATENCY_MS or 150
+            ) or 150.0
+        except Exception:
+            stats["latency_target_ms"] = 150.0
+
+        if "recognition_source" in tel.columns:
+            src = tel["recognition_source"].astype(str).str.lower()
+            counts = src.value_counts()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            labels = ["local", "cloud", "none"]
+            vals = [int(counts.get(lb, 0)) for lb in labels]
+            ax.bar(labels, vals, color=["#2ca02c", "#1f77b4", "#7f7f7f"])
+            _style_axes(ax, "Source", "Frame count", "Recognition source breakdown")
+            _annotate_figure(fig, exp_lbl, batch_ts)
+            _savefig(plots_dir / "recognition_source_breakdown.png", plt)
+
+        if "attendance_state" in tel.columns and "_t_rel_s" in tel.columns:
+            state_order = [
+                "undetected",
+                "candidate",
+                "initialized",
+                "confirmed",
+                "manual_review",
+                "expired",
+                "insufficient_presence",
+            ]
+            level_map = {s: i for i, s in enumerate(state_order)}
+            ast = tel["attendance_state"].astype(str).str.lower()
+            levels = ast.map(level_map).fillna(0)
+            fig, ax = plt.subplots(figsize=(9, 4))
+            ax.step(
+                tel["_t_rel_s"],
+                levels,
+                where="post",
+                lw=0.9,
+                color="#9467bd",
+            )
+            ax.set_yticks(list(range(len(state_order))))
+            ax.set_yticklabels(state_order)
+            _style_axes(ax, "Time (s from start)", "Attendance state", "Attendance state timeline")
+            _annotate_figure(fig, exp_lbl, batch_ts)
+            _savefig(plots_dir / "attendance_state_timeline.png", plt)
+
+        if "cpu_temp_c" in tel.columns and "offload_reason" in tel.columns:
+            tt = tel[(tel["cpu_temp_c"].astype(float) > 0)].copy()
+            if len(tt) > 1:
+                tt["offload_flag"] = (
+                    tt["offload_reason"].astype(str).str.lower() != "none"
+                ).astype(int)
+                bins = max(5, min(12, len(tt) // 20))
+                try:
+                    tt["temp_bin"] = pd.cut(
+                        tt["cpu_temp_c"].astype(float),
+                        bins=bins,
+                    )
+                    g = tt.groupby("temp_bin", observed=True)["offload_flag"].mean()
+                    centers = [interval.mid for interval in g.index]
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    ax.plot(centers, g.values, marker="o", lw=1.2, color="#d62728")
+                    _style_axes(
+                        ax,
+                        "CPU temperature (°C, bin mid)",
+                        "Offload ratio",
+                        "Offload rate vs temperature",
+                    )
+                    _annotate_figure(fig, exp_lbl, batch_ts)
+                    _savefig(plots_dir / "offload_vs_temp.png", plt)
+                except Exception:
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    sc = ax.scatter(
+                        tt["cpu_temp_c"],
+                        tt["offload_flag"],
+                        c=tt["_t_rel_s"],
+                        cmap="coolwarm",
+                        s=12,
+                        alpha=0.65,
+                    )
+                    plt.colorbar(sc, ax=ax, label="Time (s)")
+                    _style_axes(
+                        ax,
+                        "CPU temperature (°C)",
+                        "Offload (0/1)",
+                        "Offload vs temperature",
+                    )
+                    _annotate_figure(fig, exp_lbl, batch_ts)
+                    _savefig(plots_dir / "offload_vs_temp.png", plt)
+
+        stats["experiment_health_score"] = compute_experiment_health_score(stats)
 
     if diag is not None and len(diag) > 0:
         diag = diag.sort_values("timestamp")
@@ -813,6 +998,12 @@ def generate_experiment_report(
         except Exception:
             stats["runtime_log_tail"] = ""
 
+    if "experiment_health_score" not in stats:
+        from edge.observability import compute_experiment_health_score
+
+        stats.setdefault("latency_target_ms", 150.0)
+        stats["experiment_health_score"] = compute_experiment_health_score(stats)
+
     json_path = summ_dir / f"report_{batch_ts}.json"
     with open(json_path, "w", encoding="utf-8") as jf:
         outj = {k: v for k, v in stats.items() if k != "runtime_log_tail"}
@@ -840,6 +1031,17 @@ def generate_experiment_report(
         "latency_total_ms_p99",
         "cpu_temp_mean",
         "cpu_temp_max",
+        "fan_state_last",
+        "fan_state_counts",
+        "recognition_local_count",
+        "recognition_offload_count",
+        "attendance_confirmed",
+        "attendance_insufficient",
+        "surveillance_presence_ratio",
+        "fan_switch_count",
+        "thermal_time_low_sec",
+        "thermal_time_high_sec",
+        "experiment_health_score",
         "dropped_frames_heuristic",
         "spoof_rows",
         "real_rows",
@@ -880,6 +1082,12 @@ def generate_experiment_report(
             "## Plots",
             "",
             f"PNG files under `{plots_dir}` with prefix `report_{batch_ts}_`.",
+            "",
+            "Thermal fan plots (when `fan_state` telemetry present): "
+            "`fan_vs_temp.png`, `temp_vs_latency.png`, `fan_vs_fps.png`.",
+            "",
+            "Unified observability (D5): `attendance_state_timeline.png`, "
+            "`offload_vs_temp.png`, `recognition_source_breakdown.png`.",
             "",
             "Relational / hypothesis-driven figures use the `rel_` and `hybrid_` prefixes.",
             "",

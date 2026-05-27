@@ -14,6 +14,10 @@
 #   bash deployment/cloud/run_backend.sh
 #   bash deployment/cloud/run_backend.sh --host 0.0.0.0 --port 8000 --reload
 #
+# Access logs are disabled by default (--no-access-log) so dashboard polling
+# does not flood the terminal. Set HYBRID_VERBOSE_HTTP=true to restore access
+# lines for non-polling routes (see cloud_backend/system/logging_config.py).
+#
 # Override the telemetry storage directory:
 #   CLOUD_STORAGE_DIR=/var/lib/hybrid-cloud bash deployment/cloud/run_backend.sh
 #
@@ -24,6 +28,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLOUD_DIR="$REPO_ROOT/cloud"
+
+# Load deployment/env/{profile}.env (HYBRID_PROFILE defaults to development)
+# shellcheck source=/dev/null
+source "$REPO_ROOT/deployment/common/load_profile.sh"
 
 if [[ ! -d "$CLOUD_DIR" ]]; then
   echo "Error: cloud directory not found at $CLOUD_DIR" >&2
@@ -37,7 +45,7 @@ if ! command -v uvicorn >/dev/null 2>&1; then
   exit 3
 fi
 
-DEFAULT_ARGS=(--host 0.0.0.0 --port 8000)
+DEFAULT_ARGS=(--host 0.0.0.0 --port 8000 --no-access-log)
 ARGS=("$@")
 if [[ ${#ARGS[@]} -eq 0 ]]; then
   ARGS=("${DEFAULT_ARGS[@]}")
@@ -49,6 +57,8 @@ echo "  Repo root  : $REPO_ROOT"
 echo "  cwd        : $CLOUD_DIR  (gallery/ resolves here)"
 echo "  app-dir    : $REPO_ROOT  (cloud_backend importable)"
 echo "  args       : ${ARGS[*]}"
+echo "  profile    : ${HYBRID_PROFILE:-development}"
+echo "  verbose_http: ${HYBRID_VERBOSE_HTTP:-false}"
 echo "  storage    : ${CLOUD_STORAGE_DIR:-<repo>/cloud_storage}"
 echo "=================================================="
 
