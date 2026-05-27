@@ -20,6 +20,8 @@ from cloud_backend.models.recognition_event_log import RecognitionEventLog
 from cloud_backend.models.student import Student
 from cloud_backend.sessions.exceptions import LectureNotFoundError
 
+VISIBILITY_TELEMETRY_LIMIT = 20
+
 
 def _parse_meta(meta_json: str | None) -> dict:
     if not meta_json:
@@ -107,6 +109,7 @@ async def fetch_lecture_events(
         .join(Student, AttendanceRecord.student_id == Student.id)
         .where(AttendanceRecord.lecture_id == lecture_id)
         .order_by(AttendanceEvent.created_at.desc())
+        .limit(VISIBILITY_TELEMETRY_LIMIT)
     )
     result = await session.execute(stmt)
     return list(result.all())
@@ -118,13 +121,14 @@ async def fetch_recognition_logs(
     lecture_id: uuid.UUID | None = None,
     classroom_id: uuid.UUID | None = None,
     camera_id: str | None = None,
-    limit: int = 100,
+    limit: int = VISIBILITY_TELEMETRY_LIMIT,
     offset: int = 0,
 ) -> list[RecognitionEventLog]:
+    bounded_limit = min(max(1, limit), VISIBILITY_TELEMETRY_LIMIT)
     stmt = (
         select(RecognitionEventLog)
         .order_by(RecognitionEventLog.received_at.desc())
-        .limit(limit)
+        .limit(bounded_limit)
         .offset(offset)
     )
     if lecture_id is not None:

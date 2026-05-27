@@ -40,7 +40,9 @@ async def check_database() -> dict[str, Any]:
             await session.execute(text("SELECT 1"))
         return {"ok": True, "detail": "connected"}
     except Exception as exc:  # noqa: BLE001
-        log.warning("database health check failed: %s", exc)
+        from cloud_backend.system.observability import log_ops
+
+        log_ops(log, "WARN", f"Database health check failed: {exc}", level=logging.WARNING)
         return {"ok": False, "detail": str(exc)[:200]}
 
 

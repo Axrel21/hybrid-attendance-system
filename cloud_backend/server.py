@@ -38,15 +38,15 @@ from cloud_backend.system.settings import get_settings, load_settings
 
 load_settings()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+
+from cloud_backend.system.logging_config import configure_server_logging, is_polling_path, is_verbose_http
 
 log = logging.getLogger("cloud_backend.server")
 _settings = get_settings()
-logging.basicConfig(
-    level=getattr(logging, _settings.log_level, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
+configure_server_logging(level=_settings.log_level)
+
+_access_log = logging.getLogger("cloud_backend.access")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CLOUD_DIR = _REPO_ROOT / "cloud"
@@ -80,6 +80,22 @@ def _load_verification_app() -> "FastAPI":
 
 
 app: "FastAPI" = _load_verification_app()
+
+
+@app.middleware("http")
+async def operational_access_log(request: Request, call_next):
+    """Optional HTTP access lines when HYBRID_VERBOSE_HTTP=true (non-polling only)."""
+    response = await call_next(request)
+    if is_verbose_http():
+        path = request.url.path
+        if not is_polling_path(request.method, path):
+            _access_log.info(
+                "%s %s → %s",
+                request.method,
+                path,
+                response.status_code,
+            )
+    return response
 
 # Late imports: these need fastapi but no cv2 / insightface.
 from cloud_backend.telemetry.api import router as telemetry_router  # noqa: E402
@@ -151,7 +167,9 @@ def _has_route(application: "FastAPI", path: str) -> bool:
 
 
 log.info(
-    "cloud_backend.server ready: telemetry=%d dashboard=%d visibility=%d attendance=%d recognition=%d",
+    "Backend ready profile=%s verbose_http=%s telemetry=%d dashboard=%d visibility=%d attendance=%d recognition=%d",
+    _settings.profile,
+    is_verbose_http(),
     sum(1 for _ in telemetry_router.routes),
     sum(1 for _ in dashboard_router.routes),
     sum(1 for _ in attendance_visibility_router.routes),

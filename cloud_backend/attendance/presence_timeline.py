@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
 from cloud_backend.system.settings import get_settings
 from dataclasses import dataclass
 from typing import Literal
+
+log = logging.getLogger("cloud_backend.attendance.presence_timeline")
 
 PresenceStatus = Literal["active", "inactive"]
 
@@ -85,17 +88,37 @@ class PresenceTimelineService:
                     session.last_seen = timestamp_ms
 
     def _expire_stale(self, now_ms: int) -> None:
-        for session in self._sessions.values():
-            if session.status != "active":
-                continue
-            if now_ms - session.last_seen > self._timeout_ms:
-                session.status = "inactive"
+        stale_keys = [
+            key
+            for key, session in self._sessions.items()
+            if now_ms - session.last_seen > self._timeout_ms
+        ]
+        if stale_keys:
+            from cloud_backend.system.observability import log_ops
 
-    def list_sessions(self, camera_id: str | None = None) -> list[PresenceSession]:
+            for key in stale_keys:
+                session = self._sessions[key]
+                log_ops(
+                    log,
+                    "SURVEILLANCE",
+                    f"Session timeout: track={session.track_id} camera={session.camera_id} "
+                    f"duration={session.duration_sec}s",
+                )
+        for key in stale_keys:
+            del self._sessions[key]
+
+    def list_sessions(
+        self,
+        camera_id: str | None = None,
+        *,
+        include_inactive: bool = False,
+    ) -> list[PresenceSession]:
         with self._lock:
             self._expire_stale(int(time.time() * 1000))
 
             sessions = list(self._sessions.values())
+            if not include_inactive:
+                sessions = [s for s in sessions if s.status == "active"]
             if camera_id is not None:
                 sessions = [s for s in sessions if s.camera_id == camera_id]
             sessions.sort(key=lambda s: (s.camera_id, s.track_id))

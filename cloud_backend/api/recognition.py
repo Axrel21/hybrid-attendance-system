@@ -53,6 +53,10 @@ async def ingest_recognition_event(
             disposition=result.disposition,
             gallery_identity=result.gallery_identity,
             lecture_id=str(result.lecture_id) if result.lecture_id else None,
+            from_state=result.from_state,
+            to_state=result.to_state,
+            confidence=payload.confidence,
+            source=payload.source,
         )
         return IngestionResult(
             accepted=result.accepted,

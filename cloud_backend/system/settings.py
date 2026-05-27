@@ -78,6 +78,7 @@ class AttendanceTunables:
 class SystemSettings:
     profile: str = "development"
     log_level: str = "INFO"
+    verbose_http: bool = False
     attendance: AttendanceTunables = field(default_factory=AttendanceTunables)
 
     def safe_summary(self) -> dict:
@@ -86,6 +87,7 @@ class SystemSettings:
         return {
             "profile": self.profile,
             "log_level": self.log_level,
+            "verbose_http": self.verbose_http,
             "attendance": {
                 "eligibility_threshold": att.eligibility_threshold,
                 "presence_session_timeout_s": att.presence_session_timeout_s,
@@ -135,9 +137,9 @@ def get_settings() -> SystemSettings:
             os.environ.get("SURVEILLANCE_PRESENCE_ENABLED"), True
         ),
         surveillance_presence_timeout_s=_parse_float(
-            os.environ.get("SURVEILLANCE_PRESENCE_TIMEOUT_S"), 1.0
+            os.environ.get("SURVEILLANCE_PRESENCE_TIMEOUT_S"), 45.0
         ),
-        surveillance_heartbeat_s=_parse_int(os.environ.get("SURVEILLANCE_HEARTBEAT_S"), 30),
+        surveillance_heartbeat_s=_parse_int(os.environ.get("SURVEILLANCE_HEARTBEAT_S"), 5),
         cloud_server_url=os.environ.get("CLOUD_SERVER_URL", "http://localhost:8000").rstrip(
             "/"
         ),
@@ -145,5 +147,6 @@ def get_settings() -> SystemSettings:
     return SystemSettings(
         profile=profile,
         log_level=os.environ.get("HYBRID_LOG_LEVEL", "INFO").upper(),
+        verbose_http=_parse_bool(os.environ.get("HYBRID_VERBOSE_HTTP"), False),
         attendance=attendance,
     )

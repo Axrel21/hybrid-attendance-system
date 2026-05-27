@@ -16,6 +16,7 @@ from cloud_backend.api.serializers import (
     build_lecture_response,
 )
 from cloud_backend.api.visibility_queries import (
+    VISIBILITY_TELEMETRY_LIMIT,
     _infer_recognition_outcome,
     _parse_meta,
     count_recognition_logs,
@@ -76,15 +77,20 @@ async def list_active_lectures_by_classroom(
     session: AsyncSession = Depends(get_db_session),
 ) -> ActiveLecturesByClassroomResponse:
     lectures = await fetch_all_active_lectures(session)
-    entries = [
-        ActiveLectureByClassroomEntry(
-            classroom_id=lecture.classroom_id,
-            classroom_name=lecture.classroom.name,
-            lecture=build_lecture_response(lecture),
-            attendance_summary=build_attendance_summary(lecture),
+    seen_classroom_ids: set[uuid.UUID] = set()
+    entries: list[ActiveLectureByClassroomEntry] = []
+    for lecture in lectures:
+        if lecture.classroom_id in seen_classroom_ids:
+            continue
+        seen_classroom_ids.add(lecture.classroom_id)
+        entries.append(
+            ActiveLectureByClassroomEntry(
+                classroom_id=lecture.classroom_id,
+                classroom_name=lecture.classroom.name,
+                lecture=build_lecture_response(lecture),
+                attendance_summary=build_attendance_summary(lecture),
+            )
         )
-        for lecture in lectures
-    ]
     return ActiveLecturesByClassroomResponse(
         total=len(entries),
         active_lectures=entries,
@@ -164,7 +170,7 @@ async def list_recognition_logs(
     lecture_id: Optional[uuid.UUID] = Query(default=None),
     classroom_id: Optional[uuid.UUID] = Query(default=None),
     camera_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=VISIBILITY_TELEMETRY_LIMIT, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db_session),
 ) -> RecognitionLogListResponse:
@@ -173,7 +179,7 @@ async def list_recognition_logs(
         lecture_id=lecture_id,
         classroom_id=classroom_id,
         camera_id=camera_id,
-        limit=limit,
+        limit=min(limit, VISIBILITY_TELEMETRY_LIMIT),
         offset=offset,
     )
     total = await count_recognition_logs(

@@ -37,7 +37,7 @@ class AttendanceStateService:
         states.sort(key=lambda record: (record.lecture_id or "", record.student_id))
 
         get_state_store().replace(states)
-        log.info(
+        log.debug(
             "attendance states built total=%d lecture_id=%s",
             len(states),
             lecture_id,

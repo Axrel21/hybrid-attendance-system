@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Optional
@@ -14,8 +15,14 @@ from cloud_backend.db.session import get_async_session
 from cloud_backend.attendance.schemas.lecture import LectureCreate, LectureListResponse, LectureResponse
 from cloud_backend.sessions.controller import LectureSessionController
 from cloud_backend.sessions.exceptions import LectureLifecycleError
+from cloud_backend.system.observability import log_ops
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
+log = logging.getLogger(__name__)
+
+
+def _lecture_label(response: LectureResponse) -> str:
+    return f"{response.subject_code} {response.classroom_name}"
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -38,7 +45,9 @@ async def create_lecture(
             attendance_window_minutes=payload.attendance_window_minutes,
         )
         await session.commit()
-        return build_lecture_response(lecture)
+        response = build_lecture_response(lecture)
+        log_ops(log, "ATTENDANCE", f"Lecture created: {_lecture_label(response)}")
+        return response
     except LectureLifecycleError as exc:
         await session.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -79,7 +88,9 @@ async def start_lecture(
     try:
         lecture = await controller.start_lecture(lecture_id)
         await session.commit()
-        return build_lecture_response(lecture)
+        response = build_lecture_response(lecture)
+        log_ops(log, "ATTENDANCE", f"Lecture started: {_lecture_label(response)}")
+        return response
     except LectureLifecycleError as exc:
         await session.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -94,7 +105,9 @@ async def close_lecture(
     try:
         lecture = await controller.close_lecture(lecture_id)
         await session.commit()
-        return build_lecture_response(lecture)
+        response = build_lecture_response(lecture)
+        log_ops(log, "ATTENDANCE", f"Lecture closed: {_lecture_label(response)}")
+        return response
     except LectureLifecycleError as exc:
         await session.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -109,7 +122,9 @@ async def finalize_lecture(
     try:
         lecture = await controller.finalize_lecture(lecture_id)
         await session.commit()
-        return build_lecture_response(lecture)
+        response = build_lecture_response(lecture)
+        log_ops(log, "ATTENDANCE", f"Lecture finalized: {_lecture_label(response)}")
+        return response
     except LectureLifecycleError as exc:
         await session.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
