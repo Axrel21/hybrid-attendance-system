@@ -219,6 +219,9 @@ PERF_SAMPLE_INTERVAL = 10
 THERMAL_WARN_C = float(os.environ.get("THERMAL_WARN_C", "0"))
 THERMAL_WARN_INTERVAL_S = float(os.environ.get("THERMAL_WARN_INTERVAL_S", "60"))
 
+# Automatic fan control sampling interval (wall seconds, in main loop — no threads).
+THERMAL_FAN_INTERVAL_S = float(os.environ.get("THERMAL_FAN_INTERVAL_S", "5"))
+
 # =====================================================================
 # Research telemetry (frame-level CSV + optional corner overlay)
 # =====================================================================

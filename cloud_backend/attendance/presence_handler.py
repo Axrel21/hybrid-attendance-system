@@ -36,7 +36,7 @@ class PresenceEventHandler:
             "presence_ingested",
             camera_id=payload.camera_id,
             track_id=payload.track_id,
-            event=payload.event,
+            presence_event=payload.event,
             occupancy=payload.occupancy,
         )
         return PresenceEventResult(

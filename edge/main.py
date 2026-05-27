@@ -80,6 +80,8 @@ from edge.utils import is_valid_face
 from edge.cloud_client import CloudVerificationClient, OffloadOutcome
 from edge.offload_router import create_router
 from edge.attendance_client import AttendanceIngestionClient, resolve_attendance_api_url
+from edge.thermal.fan_controller import FanController, load_thermal_config
+from edge.thermal.temperature_reader import TemperatureReader
 
 # -----------------------------------------------------------------
 # Absolute paths — derived from this file's location.
@@ -98,17 +100,6 @@ def _artifact_paths():
     if p is None:
         p = experiment_session.init_experiment_session(_PROJECT_ROOT)
     return p
-
-
-# =================================================================
-# Helper: CPU temperature (Pi sysfs; 0.0 on non-Pi / non-Linux)
-# =================================================================
-def _read_cpu_temp() -> float:
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp") as f:
-            return int(f.read().strip()) / 1000.0
-    except Exception:
-        return 0.0
 
 
 # =================================================================
@@ -421,6 +412,11 @@ class FinalHybridEdge:
         self._cpu_pct      = 0.0
         self._mem_mb       = 0.0
         self._cpu_temp_c   = 0.0
+        self._fan_state    = "OFF"
+        self._last_fan_sample_t = 0.0
+        self._temp_reader  = TemperatureReader()
+        self._fan_controller = FanController(load_thermal_config())
+        self._fan_state = self._fan_controller.get_state()
         if _PSUTIL_AVAILABLE:
             self._psutil_proc = _psutil.Process()
 
@@ -725,12 +721,22 @@ class FinalHybridEdge:
                 max(1e-9, self._fps_times[-1] - self._fps_times[0])
             ) if len(self._fps_times) >= 2 else 0.0
 
+            # ---- Fan control + temperature (every THERMAL_FAN_INTERVAL_S wall seconds) ----
+            if loop_start - self._last_fan_sample_t >= settings.THERMAL_FAN_INTERVAL_S:
+                self._last_fan_sample_t = loop_start
+                _temp = self._temp_reader.read_temp_c()
+                if _temp is not None:
+                    self._cpu_temp_c = _temp
+                self._fan_state = self._fan_controller.update(_temp)
+
             # ---- System resource sampling (every PERF_SAMPLE_INTERVAL frames) ----
             self._frame_count += 1
             if _PSUTIL_AVAILABLE and self._frame_count % settings.PERF_SAMPLE_INTERVAL == 0:
                 self._cpu_pct    = _psutil.cpu_percent(interval=None)
                 self._mem_mb     = self._psutil_proc.memory_info().rss / 1e6
-                self._cpu_temp_c = _read_cpu_temp()
+                _t = self._temp_reader.read_temp_c()
+                if _t is not None:
+                    self._cpu_temp_c = _t
                 if (
                     settings.THERMAL_WARN_C > 0
                     and self._cpu_temp_c >= settings.THERMAL_WARN_C
@@ -1183,6 +1189,7 @@ class FinalHybridEdge:
                     round(self._cpu_pct, 1),
                     round(self._mem_mb, 1),
                     round(self._cpu_temp_c, 1),
+                    self._fan_state,
                     len(objects),
                     len(valid_faces),
                     raw_count,
@@ -1200,6 +1207,7 @@ class FinalHybridEdge:
 
         # ---- Cleanup ----
         LOG_RUNTIME.info("Pipeline shutdown (closing camera and log files).")
+        self._fan_controller.cleanup()
         cap.release()
         if not settings.HEADLESS:
             cv2.destroyAllWindows()

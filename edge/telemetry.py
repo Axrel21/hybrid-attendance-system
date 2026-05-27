@@ -37,6 +37,7 @@ TELEMETRY_CSV_COLUMNS: List[str] = [
     "cpu_pct",
     "mem_mb",
     "cpu_temp_c",
+    "fan_state",
     "num_tracks",
     "num_faces_valid",
     "yunet_raw",

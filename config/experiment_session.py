@@ -55,6 +55,7 @@ _SETTINGS_SNAPSHOT_KEYS = (
     "PERF_SAMPLE_INTERVAL",
     "THERMAL_WARN_C",
     "THERMAL_WARN_INTERVAL_S",
+    "THERMAL_FAN_INTERVAL_S",
     "TELEMETRY",
     "TELEMETRY_OVERLAY",
     "TELEMETRY_LOG_EVERY_N",
@@ -133,6 +134,18 @@ def _write_settings_snapshot(path: str, experiment_id: str) -> None:
     snapshot["runtime_env_overrides"] = {
         k: v for k, v in runtime_flags.items() if v is not None
     }
+
+    try:
+        from edge.thermal.fan_controller import load_thermal_config
+
+        tc = load_thermal_config()
+        snapshot["thermal_config"] = {
+            "enabled": tc.enabled,
+            "gpio_pin": tc.gpio_pin,
+            "pwm": tc.pwm,
+        }
+    except Exception:
+        pass
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

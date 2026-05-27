@@ -335,6 +335,89 @@ def generate_experiment_report(
         stats["cpu_temp_mean"] = None if np.isnan(ct_mean) else ct_mean
         stats["cpu_temp_max"] = float(tel["cpu_temp_c"].max())
 
+        if "fan_state" in tel.columns:
+            fs = tel["fan_state"].astype(str).str.strip()
+            fs = fs[fs != ""]
+            if len(fs) > 0:
+                stats["fan_state_last"] = str(fs.iloc[-1])
+                stats["fan_state_counts"] = {
+                    str(k): int(v) for k, v in fs.value_counts().items()
+                }
+
+            _fan_levels = {"OFF": 0, "LOW": 1, "HIGH": 2, "MAX": 3}
+            tel_fan = tel.copy()
+            tel_fan["_fan_level"] = (
+                tel_fan["fan_state"].astype(str).str.upper().map(_fan_levels)
+            )
+            valid_fan = tel_fan["_fan_level"].notna()
+
+            if valid_fan.any() and (tel_fan["cpu_temp_c"].astype(float) > 0).any():
+                fig, ax = plt.subplots(figsize=(9, 4))
+                ax.plot(
+                    tel_fan["_t_rel_s"],
+                    tel_fan["cpu_temp_c"],
+                    lw=0.8,
+                    color="#ff7f0e",
+                    label="CPU temp (°C)",
+                )
+                ax2 = ax.twinx()
+                ax2.step(
+                    tel_fan["_t_rel_s"],
+                    tel_fan["_fan_level"].fillna(0),
+                    where="post",
+                    lw=0.9,
+                    color="#1f77b4",
+                    alpha=0.75,
+                    label="Fan level",
+                )
+                ax2.set_yticks([0, 1, 2, 3])
+                ax2.set_yticklabels(["OFF", "LOW", "HIGH", "MAX"])
+                ax2.set_ylabel("Fan state")
+                _style_axes(ax, "Time (s from start)", "Temperature (°C)", "Fan state vs CPU temperature")
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "fan_vs_temp.png", plt)
+
+            tt_lat = tel_fan[
+                (tel_fan["cpu_temp_c"].astype(float) > 0) & tel_fan["t_total_ms"].notna()
+            ]
+            if len(tt_lat) > 1:
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.scatter(
+                    tt_lat["cpu_temp_c"],
+                    tt_lat["t_total_ms"],
+                    c=tt_lat["_t_rel_s"],
+                    cmap="plasma",
+                    s=12,
+                    alpha=0.65,
+                )
+                _style_axes(
+                    ax,
+                    "CPU temperature (°C)",
+                    "Total frame latency (ms)",
+                    "Temperature vs pipeline latency",
+                )
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "temp_vs_latency.png", plt)
+
+            tt_fps = tel_fan[
+                valid_fan & (tel_fan["fps_rolling"].astype(float) > 0)
+            ]
+            if len(tt_fps) > 1:
+                fig, ax = plt.subplots(figsize=(8, 5))
+                ax.scatter(
+                    tt_fps["_fan_level"],
+                    tt_fps["fps_rolling"],
+                    c=tt_fps["_t_rel_s"],
+                    cmap="viridis",
+                    s=14,
+                    alpha=0.65,
+                )
+                ax.set_xticks([0, 1, 2, 3])
+                ax.set_xticklabels(["OFF", "LOW", "HIGH", "MAX"])
+                _style_axes(ax, "Fan state", "Rolling FPS", "Fan state vs throughput")
+                _annotate_figure(fig, exp_lbl, batch_ts)
+                _savefig(plots_dir / "fan_vs_fps.png", plt)
+
         if "dt_ms" in tel.columns:
             dt = tel["dt_ms"].astype(float)
             dt_pos = dt[dt > 0]
@@ -840,6 +923,8 @@ def generate_experiment_report(
         "latency_total_ms_p99",
         "cpu_temp_mean",
         "cpu_temp_max",
+        "fan_state_last",
+        "fan_state_counts",
         "dropped_frames_heuristic",
         "spoof_rows",
         "real_rows",
@@ -880,6 +965,9 @@ def generate_experiment_report(
             "## Plots",
             "",
             f"PNG files under `{plots_dir}` with prefix `report_{batch_ts}_`.",
+            "",
+            "Thermal fan plots (when `fan_state` telemetry present): "
+            "`fan_vs_temp.png`, `temp_vs_latency.png`, `fan_vs_fps.png`.",
             "",
             "Relational / hypothesis-driven figures use the `rel_` and `hybrid_` prefixes.",
             "",

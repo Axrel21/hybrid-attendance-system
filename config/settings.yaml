@@ -1,0 +1,5 @@
+# Edge hardware / thermal (Raspberry Pi). Override per deployment; not secrets.
+thermal:
+  enabled: true
+  gpio_pin: 18
+  pwm: false
