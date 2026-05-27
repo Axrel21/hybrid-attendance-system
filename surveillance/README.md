@@ -774,3 +774,76 @@ curl -s http://localhost:8000/attendance/decisions | python3 -m json.tool
 ```
 
 **Rollback:** remove `decision_router` from `cloud_backend/server.py` and delete `decision_*.py` + `schemas/decision.py`.
+
+---
+
+## D5 Track 2 — Derived Attendance States (cloud)
+
+**AttendanceStateService** maps advisory decisions to a **derived state layer** (in-memory, recomputable). Does **not** write `attendance_records`, call `AttendanceEngine`, or change recognition/evidence/presence/eligibility.
+
+### State transitions
+
+| Decision | Derived `attendance_state` | Reason tag |
+|----------|--------------------------|------------|
+| `present` | `confirmed` | `decision_present` |
+| `absent` | `insufficient_presence` | `decision_absent` |
+| `manual_review` | `manual_review` | `decision_manual_review` |
+| missing / other | `candidate` | `missing_decision` |
+
+`expired` is reserved in the schema for future lecture-closure logic (not set in Track 2).
+
+### API
+
+```bash
+curl -s http://localhost:8000/attendance/decisions | python3 -m json.tool
+curl -s http://localhost:8000/attendance/states | python3 -m json.tool
+curl -s http://localhost:8000/attendance/states/{lecture_id} | python3 -m json.tool
+```
+
+### D5 Track 2 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+```
+
+**Rollback:** remove `state_router` from `cloud_backend/server.py` and delete `state_service.py`, `state_store.py`, `state_api.py`, `schemas/derived_state.py`.
+
+---
+
+## D5 Track 3 — Lecture Finalization (cloud)
+
+**AttendanceFinalizationService** freezes derived states when a lecture reaches `finalized` status.
+
+### Behavior
+
+| Lecture status | States |
+|----------------|--------|
+| `active_window_open` (and other non-final) | Recomputed from decisions each request; `finalized: false` |
+| `finalized` | Snapshot frozen on first query after end; `finalized: true` |
+
+### Closure rules (at freeze)
+
+| Pre-freeze state | Final state |
+|------------------|-------------|
+| `candidate` | `expired` |
+| `confirmed` | unchanged |
+| `manual_review` | unchanged |
+| `insufficient_presence` | unchanged |
+
+### API
+
+```bash
+curl -s http://localhost:8000/attendance/states | python3 -m json.tool
+curl -s http://localhost:8000/attendance/finalized | python3 -m json.tool
+curl -s http://localhost:8000/attendance/finalized/{lecture_id} | python3 -m json.tool
+```
+
+### D5 Track 3 validation
+
+```bash
+python3 -m compileall cloud_backend/attendance
+```
+
+**Lecture closure:** finalize lecture via existing session API, then `GET /attendance/finalized/{lecture_id}` — expect `finalized: true` and `candidate` → `expired`.
+
+**Rollback:** remove `finalization_router` from `server.py`; delete `finalization_*.py`, `schemas/finalized.py`.
