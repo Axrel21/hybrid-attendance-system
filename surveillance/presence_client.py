@@ -91,6 +91,12 @@ class SurveillancePresenceClient:
         occupancy: int,
         timestamp_ms: Optional[int] = None,
         in_entry_zone: Optional[bool] = None,
+        appearance_embedding: Optional[list[float]] = None,
+        appearance_trigger: Optional[str] = None,
+        track_centroid_x: Optional[float] = None,
+        track_centroid_y: Optional[float] = None,
+        track_bbox: Optional[list[float]] = None,
+        track_duration_sec: Optional[int] = None,
     ) -> PresenceEmitResult:
         """Queue or send one presence event. Never raises."""
         if not self.enabled:
@@ -105,6 +111,18 @@ class SurveillancePresenceClient:
         }
         if in_entry_zone is not None:
             payload["in_entry_zone"] = bool(in_entry_zone)
+        if appearance_embedding:
+            payload["appearance_embedding"] = appearance_embedding
+        if appearance_trigger:
+            payload["appearance_trigger"] = appearance_trigger
+        if track_centroid_x is not None:
+            payload["track_centroid_x"] = float(track_centroid_x)
+        if track_centroid_y is not None:
+            payload["track_centroid_y"] = float(track_centroid_y)
+        if track_bbox:
+            payload["track_bbox"] = track_bbox
+        if track_duration_sec is not None:
+            payload["track_duration_sec"] = int(track_duration_sec)
 
         if self.batch_size <= 1:
             return self._post_one(payload)

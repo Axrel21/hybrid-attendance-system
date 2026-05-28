@@ -24,6 +24,13 @@ class PresenceSession:
     status: PresenceStatus
     handoff_identity: str | None = None
     handoff_confidence: str | None = None
+    continuity_label: str | None = None
+    continuity_note: str | None = None
+    continuity_similarity: float | None = None
+    continuity_score: float | None = None
+    continuity_confidence: str | None = None
+    continuity_recovered_from_track: int | None = None
+    continuity_recovery_age_ms: int | None = None
 
     @property
     def duration_sec(self) -> int:
@@ -41,6 +48,19 @@ class PresenceSession:
         if self.handoff_identity:
             payload["handoff_identity"] = self.handoff_identity
             payload["handoff_confidence"] = self.handoff_confidence
+        if self.continuity_label:
+            payload["continuity_label"] = self.continuity_label
+            payload["continuity_note"] = self.continuity_note
+            if self.continuity_similarity is not None:
+                payload["continuity_similarity"] = self.continuity_similarity
+            if self.continuity_score is not None:
+                payload["continuity_score"] = self.continuity_score
+            if self.continuity_confidence:
+                payload["continuity_confidence"] = self.continuity_confidence
+            if self.continuity_recovered_from_track is not None:
+                payload["continuity_recovered_from_track"] = self.continuity_recovered_from_track
+            if self.continuity_recovery_age_ms is not None:
+                payload["continuity_recovery_age_ms"] = self.continuity_recovery_age_ms
         return payload
 
 
@@ -66,6 +86,13 @@ class PresenceTimelineService:
         timestamp_ms: int,
         handoff_identity: str | None = None,
         handoff_confidence: str | None = None,
+        continuity_label: str | None = None,
+        continuity_note: str | None = None,
+        continuity_similarity: float | None = None,
+        continuity_score: float | None = None,
+        continuity_confidence: str | None = None,
+        continuity_recovered_from_track: int | None = None,
+        continuity_recovery_age_ms: int | None = None,
     ) -> None:
         """Apply appeared / heartbeat / disappeared to session state."""
         with self._lock:
@@ -80,6 +107,13 @@ class PresenceTimelineService:
                     status="active",
                     handoff_identity=handoff_identity,
                     handoff_confidence=handoff_confidence,
+                    continuity_label=continuity_label,
+                    continuity_note=continuity_note,
+                    continuity_similarity=continuity_similarity,
+                    continuity_score=continuity_score,
+                    continuity_confidence=continuity_confidence,
+                    continuity_recovered_from_track=continuity_recovered_from_track,
+                    continuity_recovery_age_ms=continuity_recovery_age_ms,
                 )
                 return
 

@@ -15,6 +15,7 @@ _TRACKER_CONFIG = "bytetrack.yaml"
 
 _active_track_ids: list[int] = []
 _track_centroids: dict[int, tuple[float, float]] = {}
+_track_bboxes: dict[int, tuple[int, int, int, int]] = {}
 
 
 def _confidence_threshold() -> float:
@@ -44,16 +45,23 @@ def get_track_centroids() -> dict[int, tuple[float, float]]:
     return dict(_track_centroids)
 
 
+def get_track_bboxes() -> dict[int, tuple[int, int, int, int]]:
+    """Pixel bounding boxes for active tracks from the latest frame."""
+    return dict(_track_bboxes)
+
+
 def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
-    global _active_track_ids, _track_centroids
+    global _active_track_ids, _track_centroids, _track_bboxes
     track_ids: list[int] = []
     centroids: dict[int, tuple[float, float]] = {}
+    bboxes: dict[int, tuple[int, int, int, int]] = {}
     height, width = frame.shape[:2]
 
     boxes = result.boxes
     if boxes is None or len(boxes) == 0 or boxes.id is None:
         _active_track_ids = []
         _track_centroids = {}
+        _track_bboxes = {}
         return
 
     xyxy = boxes.xyxy.cpu().numpy()
@@ -64,6 +72,7 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
         track_ids.append(tid)
         x1, y1, x2, y2 = map(int, box)
         centroids[tid] = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+        bboxes[tid] = (x1, y1, x2, y2)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 128, 0), 2)
         cv2.putText(
             frame,
@@ -78,6 +87,7 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
 
     _active_track_ids = sorted(set(track_ids))
     _track_centroids = centroids
+    _track_bboxes = bboxes
 
     # Doorway ROI overlay (experimental entry correlation)
     from surveillance.entry_zone import ENTRY_ZONE_RECT
@@ -125,11 +135,12 @@ def _draw_tracking_overlay(frame: np.ndarray, result: Any) -> None:
 
 def estimate_occupancy(frame: np.ndarray) -> int:
     """Return count of unique active tracked persons; draws track overlay on frame."""
-    global _active_track_ids, _track_centroids
+    global _active_track_ids, _track_centroids, _track_bboxes
 
     if frame is None or frame.size == 0:
         _active_track_ids = []
         _track_centroids = {}
+        _track_bboxes = {}
         return 0
 
     results = _get_model().track(
@@ -145,6 +156,7 @@ def estimate_occupancy(frame: np.ndarray) -> int:
     if not results:
         _active_track_ids = []
         _track_centroids = {}
+        _track_bboxes = {}
         return 0
 
     _draw_tracking_overlay(frame, results[0])

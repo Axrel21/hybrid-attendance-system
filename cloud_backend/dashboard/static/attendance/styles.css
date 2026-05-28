@@ -813,12 +813,22 @@ tr:last-child td {
 }
 
 .handoff-cell {
-  max-width: 160px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.continuity-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  color: #7c8aa0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .badge-experimental {

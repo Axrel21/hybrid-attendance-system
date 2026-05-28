@@ -1,0 +1,10 @@
+# Optional — experimental appearance-assisted continuity (trigger-based OSNet only)
+# Install from repo root:
+#   pip install -r surveillance/requirements-appearance.txt
+#
+# Keep separate from core surveillance deps; disabled unless
+# SURVEILLANCE_APPEARANCE_CONTINUITY=1
+torch>=2.0.0
+torchvision>=0.15.0
+gdown>=4.7.0
+torchreid @ git+https://github.com/KaiyangZhou/deep-person-reid.git

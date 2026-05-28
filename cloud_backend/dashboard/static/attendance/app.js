@@ -197,6 +197,47 @@ function entryCorrelationLabel(session) {
   return `${session.handoff_identity} · ${conf}`;
 }
 
+function appearanceContinuityLabel(session) {
+  if (!session?.continuity_label) return "—";
+  if (session.continuity_confidence) {
+    return session.continuity_confidence;
+  }
+  if (session.continuity_label === "entry_appearance_association") {
+    return "Experimental appearance continuity";
+  }
+  if (
+    session.continuity_label === "possible_recovered_continuity"
+    || session.continuity_label === "possible_continuity_match"
+  ) {
+    return "Possible recovered continuity";
+  }
+  return String(session.continuity_label).replace(/_/g, " ");
+}
+
+function appearanceContinuityMeta(session) {
+  const parts = [];
+  if (session?.continuity_recovered_from_track != null) {
+    parts.push(`from #${session.continuity_recovered_from_track}`);
+  }
+  if (session?.continuity_recovery_age_ms != null) {
+    parts.push(`${Math.round(session.continuity_recovery_age_ms / 1000)}s ago`);
+  }
+  if (session?.continuity_similarity != null && Number.isFinite(Number(session.continuity_similarity))) {
+    parts.push(`sim ${Math.round(Number(session.continuity_similarity) * 100)}%`);
+  }
+  if (session?.continuity_score != null && Number.isFinite(Number(session.continuity_score))) {
+    parts.push(`score ${Number(session.continuity_score).toFixed(2)}`);
+  }
+  return parts.length ? parts.join(" · ") : "";
+}
+
+function appearanceContinuityTitle(session) {
+  const base = session?.continuity_note
+    || "Experimental appearance-assisted continuity — advisory only, not guaranteed";
+  const meta = appearanceContinuityMeta(session);
+  return meta ? `${base} · ${meta}` : `${base} (experimental, non-authoritative)`;
+}
+
 function destroyOccupancyChart() {
   const canvas = $("#occupancy-chart");
   if (!canvas) return;
@@ -1099,6 +1140,9 @@ function renderPresenceSessions(data) {
       <td class="mono">${fmtDuration(s.duration_sec)}</td>
       <td>${statusPill(s.status)}</td>
       <td class="mono handoff-cell" title="Experimental spatial-temporal handoff — not persistent identity">${entryCorrelationLabel(s)}</td>
+      <td class="mono handoff-cell" title="${escapeAttr(appearanceContinuityTitle(s))}">
+        ${appearanceContinuityLabel(s)}${appearanceContinuityMeta(s) ? `<span class="continuity-meta">${appearanceContinuityMeta(s)}</span>` : ""}
+      </td>
     `;
     body.appendChild(tr);
   });
